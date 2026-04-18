@@ -35,9 +35,11 @@ class TestFromUrl:
 
     def test_parses_speakers(self):
         cfg = RoomConfig.from_url(SAMPLE_URL)
-        # After normalization: speaker_left = (4.5, 0.5), speaker_right = (4.5, 2.5)
-        assert cfg.speaker_left == pytest.approx((4.5, 0.5), abs=1e-6)
-        assert cfg.speaker_right == pytest.approx((4.5, 2.5), abs=1e-6)
+        # After normalization and L/R fix from listener perspective:
+        # L (listener's left) = higher y = (4.5, 2.5)
+        # R (listener's right) = lower y = (4.5, 0.5)
+        assert cfg.speaker_left == pytest.approx((4.5, 2.5), abs=1e-6)
+        assert cfg.speaker_right == pytest.approx((4.5, 0.5), abs=1e-6)
 
     def test_no_fragment_raises(self):
         with pytest.raises(ValueError, match="no fragment"):
@@ -46,15 +48,16 @@ class TestFromUrl:
 
     def test_no_reorigin_keeps_original_coords(self):
         cfg = RoomConfig.from_url(SAMPLE_URL, reorigin=False)
-        # Vertices should still start at (1,1), not shifted to (0,0)
         assert cfg.vertices[0] == pytest.approx((1.0, 1.0), abs=1e-6)
-        assert cfg.speaker_left == pytest.approx((5.5, 1.5), abs=1e-6)
+        # L/R assigned from listener perspective (L = higher y)
+        assert cfg.speaker_left == pytest.approx((5.5, 3.5), abs=1e-6)
+        assert cfg.speaker_right == pytest.approx((5.5, 1.5), abs=1e-6)
         assert cfg.listener == pytest.approx((3.0, 2.5), abs=1e-6)
 
     def test_reorigin_true_shifts_to_zero(self):
         cfg = RoomConfig.from_url(SAMPLE_URL, reorigin=True)
         assert cfg.vertices[0] == pytest.approx((0.0, 0.0), abs=1e-6)
-        assert cfg.speaker_left == pytest.approx((4.5, 0.5), abs=1e-6)
+        assert cfg.speaker_left == pytest.approx((4.5, 2.5), abs=1e-6)
 
 
 class TestNormalizeOrigin:

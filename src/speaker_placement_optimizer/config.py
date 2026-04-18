@@ -41,6 +41,7 @@ class RoomConfig:
     # Frequency range
     freq_max: float = 200.0
 
+
     def detect_orientation(self) -> dict:
         """Detect the speaker/listener orientation from positions.
 
@@ -124,7 +125,29 @@ class RoomConfig:
 
         if reorigin:
             cfg._normalize_origin()
+        cfg._fix_lr_labels()
         return cfg
+
+    def _fix_lr_labels(self):
+        """Assign L/R labels based on listener's perspective.
+
+        From the listener looking toward the speakers, L is the speaker
+        on the listener's left side. Swaps if needed.
+        """
+        sl, sr, li = self.speaker_left, self.speaker_right, self.listener
+        mid = ((sl[0] + sr[0]) / 2, (sl[1] + sr[1]) / 2)
+        dx, dy = mid[0] - li[0], mid[1] - li[1]
+        d = math.sqrt(dx * dx + dy * dy)
+        if d < 0.01:
+            return
+        # Listener's left = 90° CCW rotation of looking direction
+        left = (-dy / d, dx / d)
+        # Project both speakers onto "left" direction
+        proj_l = sl[0] * left[0] + sl[1] * left[1]
+        proj_r = sr[0] * left[0] + sr[1] * left[1]
+        if proj_l < proj_r:
+            # Current "L" is actually on the right → swap
+            self.speaker_left, self.speaker_right = self.speaker_right, self.speaker_left
 
     def _normalize_origin(self):
         """Shift all coordinates so the bottom-left corner is at (0, 0)."""

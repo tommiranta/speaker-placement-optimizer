@@ -103,16 +103,18 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
 
                 p1, p2 = coords[idx1], coords[idx2]
 
-                # Per-speaker side wall lock
+                # Per-speaker side wall lock: speaker must be AT the
+                # specified distance from its side wall (within grid tolerance)
                 if lock_speaker_l is not None or lock_speaker_r is not None:
                     from .geometry import describe_position
+                    grid_tol = step + 0.01
                     if lock_speaker_l is not None:
                         d1 = describe_position(p1, vertices, _orient)
-                        if d1.get("side wall L", 0) > lock_speaker_l:
+                        if abs(d1.get("side wall L", 0) - lock_speaker_l) > grid_tol:
                             continue
                     if lock_speaker_r is not None:
                         d2 = describe_position(p2, vertices, _orient)
-                        if d2.get("side wall R", 0) > lock_speaker_r:
+                        if abs(d2.get("side wall R", 0) - lock_speaker_r) > grid_tol:
                             continue
 
                 # Speakers must be at same depth along the depth axis
