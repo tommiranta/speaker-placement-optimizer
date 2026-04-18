@@ -14,12 +14,12 @@ RECT = [(0.0, 0.0), (4.0, 0.0), (4.0, 3.0), (0.0, 3.0)]
 class TestBuildDomain:
     def test_interior_point_count(self):
         coords, n_pts, mask, idx_map = build_domain(RECT, dx=0.5)
-        # Grid starts at dx/2 and steps by dx.
-        # x: 0.25, 0.75, ..., 3.75 -> 8 points
-        # y: 0.25, 0.75, ..., 2.75 -> 6 points
-        # All interior to the rectangle, so 8 * 6 = 48
-        assert n_pts == 48
-        assert coords.shape == (48, 2)
+        # Grid starts at dx from wall and steps by dx.
+        # x: 0.5, 1.0, ..., 3.5 -> 7 points
+        # y: 0.5, 1.0, ..., 2.5 -> 5 points
+        # All interior to the rectangle, so 7 * 5 = 35
+        assert n_pts == 35
+        assert coords.shape == (35, 2)
 
     def test_coords_inside_room(self):
         coords, n_pts, mask, idx_map = build_domain(RECT, dx=0.5)

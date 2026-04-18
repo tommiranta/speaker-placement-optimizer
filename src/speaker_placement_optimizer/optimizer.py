@@ -17,33 +17,62 @@ BISECTOR_TOLERANCE = 0.06   # max |dist_L - dist_R| for listener (m) — ~1 grid
 SPEAKER_CENTER_TOL = 0.06  # max speaker midpoint offset from room centerline (m)
 
 
+def _compute_locked_spread_pos(lock_dist, side, depth_coord, direction, vertices):
+    """Compute the exact spread-axis position for a locked speaker.
+
+    Args:
+        lock_dist: fixed distance from side wall (meters).
+        side: "L" or "R" — which speaker (determines which wall).
+        depth_coord: the depth-axis coordinate (x or y depending on orientation).
+        direction: spread direction unit vector (L→R).
+        vertices: room polygon.
+
+    Speaker L's side wall is in the -spread direction.
+    Speaker R's side wall is in the +spread direction.
+    The spread direction goes from L to R.
+
+    Returns: (x, y) position or None if outside room.
+    """
+    if abs(direction[0]) > abs(direction[1]):
+        rng = room_x_range_at_y(depth_coord, vertices)
+        if rng is None:
+            return None
+        if (side == "L") == (direction[0] > 0):
+            # L's wall is at rng[0] (min x) when spread goes +x
+            # L's wall is at rng[1] (max x) when spread goes -x
+            pos_spread = rng[0] + lock_dist
+        else:
+            pos_spread = rng[1] - lock_dist
+        return (pos_spread, depth_coord)
+    else:
+        rng = room_y_range_at_x(depth_coord, vertices)
+        if rng is None:
+            return None
+        if (side == "L") == (direction[1] > 0):
+            pos_spread = rng[0] + lock_dist
+        else:
+            pos_spread = rng[1] - lock_dist
+        return (depth_coord, pos_spread)
+
+
 def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                                      min_wall, vertices,
                                      max_move_x, max_move_y,
                                      lock_speaker_l=None, lock_speaker_r=None,
                                      max_spread=None):
-    """Generate candidate speaker pairs symmetric about a midpoint.
+    """Generate candidate speaker pairs.
 
-    Constraints:
-    - Symmetric about midpoint (same orientation as current pair)
-    - Each speaker within max_move per axis of original
-    - Each speaker at least min_wall from walls
-    - Pair midpoint centered between room side walls (unless asymmetric)
-    - lock_side_wall: if set, each speaker must be within this distance
-      of its nearest side wall (meters). Disables centering constraint.
-    - max_spread: if set, max speaker-to-speaker distance (meters).
+    When speakers are locked, their spread position is computed from the
+    room geometry — not searched. Only the depth axis is varied.
 
     Returns list of (s1_idx, s2_idx, midpoint, distance) tuples.
     """
     mid = np.array([(spk_l[0] + spk_r[0]) / 2, (spk_l[1] + spk_r[1]) / 2])
     d_current = dist2d(spk_l, spk_r)
     direction = np.array([spk_r[0] - spk_l[0], spk_r[1] - spk_l[1]]) / d_current
-
-    # Build orientation dict for side wall distance checks
-    perp = (-direction[1], direction[0])
-    _orient = {"spread_axis": tuple(direction),
-               "depth_axis": tuple(perp),
-               "front_wall_dir": (-perp[0], -perp[1])}
+    asymmetric = (lock_speaker_l is not None or
+                  lock_speaker_r is not None or
+                  max_spread is not None)
 
     pairs = []
     seen = set()
@@ -53,9 +82,6 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
             mx, my = mid[0] + dmx, mid[1] + dmy
 
             # Room centering check (skip in asymmetric mode)
-            asymmetric = (lock_speaker_l is not None or
-                          lock_speaker_r is not None or
-                          max_spread is not None)
             if not asymmetric:
                 if abs(direction[0]) > abs(direction[1]):
                     rng = room_x_range_at_y(my, vertices)
@@ -72,23 +98,69 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                 if abs(mid_spread - room_center_spread) > SPEAKER_CENTER_TOL:
                     continue
 
-            distance_range = max_move_y
-            for dd in np.arange(-distance_range, distance_range + step / 2, step):
-                d = d_current + dd
-                if d < 0.5:
+            # Determine spread positions
+            if lock_speaker_l is not None and lock_speaker_r is not None:
+                # Both locked: compute exact positions, no spread search
+                depth_coord = my if abs(direction[0]) > abs(direction[1]) else mx
+                pos_l = _compute_locked_spread_pos(
+                    lock_speaker_l, "L", depth_coord, direction, vertices)
+                pos_r = _compute_locked_spread_pos(
+                    lock_speaker_r, "R", depth_coord, direction, vertices)
+                if pos_l is None or pos_r is None:
                     continue
-                if max_spread is not None and d > max_spread:
-                    continue
-                half = d / 2
-                s1x = mx - half * direction[0]
-                s1y = my - half * direction[1]
-                s2x = mx + half * direction[0]
-                s2y = my + half * direction[1]
+                spread_candidates = [(pos_l, pos_r)]
+            elif lock_speaker_l is not None or lock_speaker_r is not None:
+                # One locked: compute its position, search the other
+                depth_coord = my if abs(direction[0]) > abs(direction[1]) else mx
+                spread_candidates = []
+                for dd in np.arange(-max_move_y, max_move_y + step / 2, step):
+                    d = d_current + dd
+                    if d < 0.5:
+                        continue
+                    if max_spread is not None and d > max_spread:
+                        continue
+                    half = d / 2
+                    if lock_speaker_l is not None:
+                        pos_l = _compute_locked_spread_pos(
+                            lock_speaker_l, "L", depth_coord, direction, vertices)
+                        if pos_l is None:
+                            continue
+                        # R is at lock_L_pos + d along spread
+                        pos_r = (pos_l[0] + d * direction[0],
+                                 pos_l[1] + d * direction[1])
+                    else:
+                        pos_r = _compute_locked_spread_pos(
+                            lock_speaker_r, "R", depth_coord, direction, vertices)
+                        if pos_r is None:
+                            continue
+                        pos_l = (pos_r[0] - d * direction[0],
+                                 pos_r[1] - d * direction[1])
+                    spread_candidates.append((pos_l, pos_r))
+            else:
+                # No locks: search midpoint + spread as before
+                spread_candidates = []
+                distance_range = max_move_y
+                for dd in np.arange(-distance_range, distance_range + step / 2, step):
+                    d = d_current + dd
+                    if d < 0.5:
+                        continue
+                    if max_spread is not None and d > max_spread:
+                        continue
+                    half = d / 2
+                    s1 = (mx - half * direction[0], my - half * direction[1])
+                    s2 = (mx + half * direction[0], my + half * direction[1])
+                    spread_candidates.append((s1, s2))
 
-                if (abs(s1x - spk_l[0]) > max_move_x or
-                    abs(s1y - spk_l[1]) > max_move_y or
-                    abs(s2x - spk_r[0]) > max_move_x or
-                    abs(s2y - spk_r[1]) > max_move_y):
+            for (s1_pos, s2_pos) in spread_candidates:
+                s1x, s1y = s1_pos
+                s2x, s2y = s2_pos
+
+                # Max move check: depth always, spread only for unlocked speakers
+                if abs(s1x - spk_l[0]) > max_move_x or abs(s2x - spk_r[0]) > max_move_x:
+                    continue
+                if lock_speaker_l is None and abs(s1y - spk_l[1]) > max_move_y:
+                    continue
+                if lock_speaker_r is None and abs(s2y - spk_r[1]) > max_move_y:
                     continue
 
                 idx1 = nearest_idx(s1x, s1y, coords)
@@ -102,20 +174,6 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                     continue
 
                 p1, p2 = coords[idx1], coords[idx2]
-
-                # Per-speaker side wall lock: speaker must be AT the
-                # specified distance from its side wall (within grid tolerance)
-                if lock_speaker_l is not None or lock_speaker_r is not None:
-                    from .geometry import describe_position
-                    grid_tol = step + 0.01
-                    if lock_speaker_l is not None:
-                        d1 = describe_position(p1, vertices, _orient)
-                        if abs(d1.get("side wall L", 0) - lock_speaker_l) > grid_tol:
-                            continue
-                    if lock_speaker_r is not None:
-                        d2 = describe_position(p2, vertices, _orient)
-                        if abs(d2.get("side wall R", 0) - lock_speaker_r) > grid_tol:
-                            continue
 
                 # Speakers must be at same depth along the depth axis
                 depth1 = p1[0] * direction[1] - p1[1] * direction[0]

@@ -33,8 +33,10 @@ def build_domain(vertices, dx=GRID_DX):
     """
     xs = [v[0] for v in vertices]
     ys = [v[1] for v in vertices]
-    x_grid = np.arange(min(xs) + dx / 2, max(xs), dx)
-    y_grid = np.arange(min(ys) + dx / 2, max(ys), dx)
+    # Start grid at wall boundary + dx so points are at round multiples of dx
+    # from the walls (e.g. 5cm, 10cm, 15cm... not 2.5cm, 7.5cm, 12.5cm)
+    x_grid = np.arange(min(xs) + dx, max(xs), dx)
+    y_grid = np.arange(min(ys) + dx, max(ys), dx)
     nx, ny = len(x_grid), len(y_grid)
     xx, yy = np.meshgrid(x_grid, y_grid, indexing="ij")
     all_pts = np.column_stack([xx.ravel(), yy.ravel()])
