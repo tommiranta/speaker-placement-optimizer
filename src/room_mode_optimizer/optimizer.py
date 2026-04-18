@@ -80,11 +80,20 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                 if wall_dist[idx1] < min_wall or wall_dist[idx2] < min_wall:
                     continue
 
-                # Enforce exact symmetry after grid snap:
-                # speakers must be at same depth (same x-coordinate)
+                # Enforce exact symmetry after grid snap
                 p1, p2 = coords[idx1], coords[idx2]
+
+                # Speakers must be at same depth (same x-coordinate)
                 if abs(p1[0] - p2[0]) > 1e-6:
                     continue
+
+                # Speaker pair must be centered between side walls
+                actual_mid_y = (p1[1] + p2[1]) / 2
+                yr = room_y_range_at_x(p1[0], vertices)
+                if yr is not None:
+                    room_cy = (yr[0] + yr[1]) / 2
+                    if abs(actual_mid_y - room_cy) > SPEAKER_CENTER_TOL:
+                        continue
 
                 key = (idx1, idx2)
                 if key not in seen:

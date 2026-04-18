@@ -57,6 +57,13 @@ def main(url, fix_listener, absorption, move_fraction, top, freq_max,
     if freq_max is not None:
         cfg.freq_max = freq_max
 
+    # Auto-correct asymmetric input
+    corrections = cfg.symmetrize()
+    if corrections:
+        click.echo("\nInput corrected for stereo symmetry:")
+        for c in corrections:
+            click.echo(f"  • {c}")
+
     # Run optimization
     result = run_optimization(cfg, fix_listener=fix_listener)
 
@@ -152,16 +159,24 @@ def main(url, fix_listener, absorption, move_fraction, top, freq_max,
 
 
 def _open_url(url: str):
-    """Open a URL in the default browser without shell interpretation.
+    """Open a URL in the default browser.
 
-    Uses subprocess directly to avoid shell mangling of # and | characters.
+    Writes a temporary HTML redirect file to avoid shell/OS mangling of
+    special characters (#, |) in the URL.
     """
+    import html
+    import tempfile
+    escaped = html.escape(url, quote=True)
+    with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False) as f:
+        f.write(f'<html><head><meta http-equiv="refresh" content="0;url={escaped}">'
+                f'</head><body><a href="{escaped}">Open</a></body></html>')
+        tmp_path = f.name
     if sys.platform == "darwin":
-        subprocess.Popen(["open", url])
+        subprocess.Popen(["open", tmp_path])
     elif sys.platform == "win32":
-        subprocess.Popen(["start", "", url], shell=True)
+        subprocess.Popen(["start", "", tmp_path], shell=True)
     else:
-        subprocess.Popen(["xdg-open", url])
+        subprocess.Popen(["xdg-open", tmp_path])
 
 
 def _print_placement(sl_p, sr_p, lpos, vertices):

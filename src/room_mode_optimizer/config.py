@@ -95,6 +95,57 @@ class RoomConfig:
         self.listener = (self.listener[0] - x_min,
                          self.listener[1] - y_min)
 
+    def symmetrize(self) -> list[str]:
+        """Correct speaker and listener positions for stereo symmetry.
+
+        Ensures:
+        - Both speakers at the same depth (averaged x).
+        - Speaker pair centered between side walls at their depth.
+        - Listener on the perpendicular bisector (centered y between speakers).
+
+        Returns list of correction messages (empty if no changes needed).
+        """
+        corrections = []
+        sl = self.speaker_left
+        sr = self.speaker_right
+
+        # 1. Speakers at same depth (same x)
+        if abs(sl[0] - sr[0]) > 0.01:
+            avg_x = (sl[0] + sr[0]) / 2
+            corrections.append(
+                f"Aligned speaker depth: both moved to x={avg_x:.2f} "
+                f"(was L={sl[0]:.2f}, R={sr[0]:.2f})")
+            sl = (avg_x, sl[1])
+            sr = (avg_x, sr[1])
+
+        # 2. Center speaker pair between side walls
+        if self.vertices:
+            from .geometry import room_y_range_at_x
+            yr = room_y_range_at_x(sl[0], self.vertices)
+            if yr is not None:
+                room_center_y = (yr[0] + yr[1]) / 2
+                pair_mid_y = (sl[1] + sr[1]) / 2
+                offset = pair_mid_y - room_center_y
+                if abs(offset) > 0.01:
+                    sl = (sl[0], sl[1] - offset)
+                    sr = (sr[0], sr[1] - offset)
+                    corrections.append(
+                        f"Centered speakers between side walls: "
+                        f"shifted {-offset:+.2f} m to room center y={room_center_y:.2f}")
+
+        self.speaker_left = sl
+        self.speaker_right = sr
+
+        # 3. Center listener between speakers (on perpendicular bisector)
+        spk_mid_y = (sl[1] + sr[1]) / 2
+        if abs(self.listener[1] - spk_mid_y) > 0.01:
+            corrections.append(
+                f"Centered listener: y {self.listener[1]:.2f} → {spk_mid_y:.2f} "
+                f"(midpoint of speakers)")
+            self.listener = (self.listener[0], spk_mid_y)
+
+        return corrections
+
     def generate_url(self, spk_l, spk_r, listener_xy) -> str:
         """Generate a vesalaasanen.com URL for a given placement."""
         poly = f"poly,{self.height:.2f}," + ",".join(
