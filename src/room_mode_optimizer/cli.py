@@ -6,12 +6,15 @@ import time
 import click
 import numpy as np
 
-from .config import DEFAULT_CONFIG, RoomConfig
+from .config import RoomConfig
 from .geometry import describe_position, dist2d, room_y_range_at_x
 from .optimizer import run_optimization
 from .solver import (
-    compute_speaker_contribution, nearest_idx, response_stats, score_responses,
+    compute_speaker_contribution, response_stats,
 )
+
+# Minimum difference between shown results to ensure diversity
+MIN_RESULT_DISTANCE = 0.15  # meters (in speaker spread or depth)
 
 
 @click.command()
@@ -23,6 +26,8 @@ from .solver import (
               help="Override absorption coefficient (0.0–1.0).")
 @click.option("--move-fraction", type=float, default=None,
               help="Speaker move range as fraction of room dimensions (default: 0.30).")
+@click.option("--max-speaker-depth", type=int, default=None,
+              help="Max speaker distance from front wall in cm (default: no limit).")
 @click.option("--top", type=int, default=5,
               help="Number of top results to show (default: 5).")
 @click.option("--freq-max", type=float, default=None,
@@ -31,12 +36,12 @@ from .solver import (
               help="Shift coordinates so the bottom-left corner is at (0,0).")
 @click.option("--open-browser", is_flag=True, default=False,
               help="Open the best result URL in the default web browser.")
-def main(url, fix_listener, absorption, move_fraction, top, freq_max,
-         reorigin, open_browser):
+def main(url, fix_listener, absorption, move_fraction, max_speaker_depth,
+         top, freq_max, reorigin, open_browser):
     """Optimize speaker and listener placement to minimize room mode effects.
 
-    Reads room configuration from a vesalaasanen.com URL (--url) or uses the
-    built-in default. Outputs the top placements with verification URLs.
+    Reads room configuration from a vesalaasanen.com URL (--url).
+    Outputs the top placements with verification URLs.
     """
     t0 = time.time()
 
@@ -56,6 +61,8 @@ def main(url, fix_listener, absorption, move_fraction, top, freq_max,
         cfg.move_fraction = move_fraction
     if freq_max is not None:
         cfg.freq_max = freq_max
+    if max_speaker_depth is not None:
+        cfg.max_speaker_depth = max_speaker_depth / 100.0  # cm → m
 
     # Auto-correct asymmetric input
     corrections = cfg.symmetrize()
@@ -98,21 +105,33 @@ def main(url, fix_listener, absorption, move_fraction, top, freq_max,
                f"null={null_o:.1f} dB")
     click.echo(f"  Acoustic score: {result['score_orig']:.2f}")
 
-    # Print top results
-    shown = set()
+    # Print top results with diversity filtering
+    shown_configs = []  # list of (speaker_x, spread, listener_x) for diversity
     rank = 0
     best_url = None
     for score, s1, s2, li in result["configs"]:
-        key = (s1, s2, li)
-        if key in shown:
+        sl_p, sr_p, lpos = coords[s1], coords[s2], coords[li]
+        spk_x = sl_p[0]
+        spread = dist2d(sl_p, sr_p)
+        li_x = lpos[0]
+
+        # Diversity filter: skip if too similar to an already-shown result
+        too_similar = False
+        for prev_sx, prev_spread, prev_lx in shown_configs:
+            if (abs(spk_x - prev_sx) < MIN_RESULT_DISTANCE and
+                abs(spread - prev_spread) < MIN_RESULT_DISTANCE and
+                abs(li_x - prev_lx) < MIN_RESULT_DISTANCE):
+                too_similar = True
+                break
+        if too_similar:
             continue
-        shown.add(key)
+
+        shown_configs.append((spk_x, spread, li_x))
         rank += 1
         if rank > top:
             break
 
-        sl_p, sr_p, lpos = coords[s1], coords[s2], coords[li]
-        ss = dist2d(sl_p, sr_p)
+        ss = spread
         d_l, d_r = dist2d(lpos, sl_p), dist2d(lpos, sr_p)
 
         resp = (compute_speaker_contribution(s1, li, evecs, inv_denom, z_w) +
@@ -139,7 +158,7 @@ def main(url, fix_listener, absorption, move_fraction, top, freq_max,
         click.echo(f"    Centering:  offset from room center: {center_off:+.2f} m")
         click.echo(f"    Response:   std={std_v:.1f} dB, peak=+{peak_v:.1f} dB, "
                    f"null={null_v:.1f} dB")
-        click.echo(f"    URL: {url_out}")
+        _print_link(f"#{rank}", url_out)
         if best_url is None:
             best_url = url_out
 
@@ -156,6 +175,29 @@ def main(url, fix_listener, absorption, move_fraction, top, freq_max,
     if open_browser and best_url:
         click.echo(f"\nOpening best result in browser...")
         _open_url(best_url)
+
+
+def _print_placement(sl_p, sr_p, lpos, vertices):
+    """Print human-readable wall distances."""
+    sl_d = describe_position(sl_p, vertices)
+    sr_d = describe_position(sr_p, vertices)
+    li_d = describe_position(lpos, vertices)
+    click.echo(f"    Speaker L:  {sl_d.get('front wall (right)', 0):.2f} m from front wall, "
+               f"{sl_d.get('side wall (bottom)', 0):.2f} m from closest side wall")
+    click.echo(f"    Speaker R:  {sr_d.get('front wall (right)', 0):.2f} m from front wall, "
+               f"{sr_d.get('side wall (top)', 0):.2f} m from closest side wall")
+    click.echo(f"    Listener:   {li_d.get('front wall (right)', 0):.2f} m from front wall, "
+               f"{li_d.get('rear wall (left)', 0):.2f} m from rear wall")
+
+
+def _print_link(label: str, url: str):
+    """Print a clickable terminal hyperlink using OSC 8 escape sequences.
+
+    Works in Ghostty, iTerm2, Windows Terminal, and most modern terminals.
+    Falls back to plain text in terminals that don't support it.
+    """
+    # OSC 8 hyperlink: \e]8;;URL\e\\TEXT\e]8;;\e\\
+    click.echo(f"    Link: \033]8;;{url}\033\\Open {label} in calculator\033]8;;\033\\")
 
 
 def _open_url(url: str):
@@ -177,19 +219,6 @@ def _open_url(url: str):
         subprocess.Popen(["start", "", tmp_path], shell=True)
     else:
         subprocess.Popen(["xdg-open", tmp_path])
-
-
-def _print_placement(sl_p, sr_p, lpos, vertices):
-    """Print human-readable wall distances."""
-    sl_d = describe_position(sl_p, vertices)
-    sr_d = describe_position(sr_p, vertices)
-    li_d = describe_position(lpos, vertices)
-    click.echo(f"    Speaker L:  {sl_d.get('front wall (right)', 0):.2f} m from front wall, "
-               f"{sl_d.get('side wall (bottom)', 0):.2f} m from closest side wall")
-    click.echo(f"    Speaker R:  {sr_d.get('front wall (right)', 0):.2f} m from front wall, "
-               f"{sr_d.get('side wall (top)', 0):.2f} m from closest side wall")
-    click.echo(f"    Listener:   {li_d.get('front wall (right)', 0):.2f} m from front wall, "
-               f"{li_d.get('rear wall (left)', 0):.2f} m from rear wall")
 
 
 if __name__ == "__main__":

@@ -30,6 +30,9 @@ class RoomConfig:
     # Search parameters
     search_step: float = 0.05
 
+    # Speaker depth constraint
+    max_speaker_depth: float | None = None  # max distance from front wall (m), None=no limit
+
     # Frequency range
     freq_max: float = 200.0
 

@@ -203,7 +203,18 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
     max_move_x = room_depth * cfg.move_fraction
     max_move_y = room_width * cfg.move_fraction
 
-    print(f"\n  Move range: x ±{max_move_x:.2f} m ({cfg.move_fraction:.0%} of "
+    # Limit speaker depth from front wall if configured
+    front_wall_x = max(xs)
+    if cfg.max_speaker_depth is not None:
+        min_speaker_x = front_wall_x - cfg.max_speaker_depth
+        current_spk_x = coords[sp_l_idx][0]
+        # Clamp max_move_x so speakers don't go deeper than the limit
+        max_move_into_room = current_spk_x - min_speaker_x
+        max_move_x = min(max_move_x, max(max_move_into_room, 0))
+        print(f"\n  Max speaker depth: {cfg.max_speaker_depth * 100:.0f} cm from front wall "
+              f"(min x = {min_speaker_x:.2f})")
+
+    print(f"  Move range: x ±{max_move_x:.2f} m ({cfg.move_fraction:.0%} of "
           f"{room_depth:.2f} m), y ±{max_move_y:.2f} m ({cfg.move_fraction:.0%} of "
           f"{room_width:.2f} m)")
 
