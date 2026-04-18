@@ -92,6 +92,26 @@ def room_y_range_at_x(x: float, vertices: list) -> tuple[float, float] | None:
     return min(intersections), max(intersections)
 
 
+def room_x_range_at_y(y: float, vertices: list) -> tuple[float, float] | None:
+    """Compute the min/max x of the room interior at a given y coordinate.
+
+    Returns (x_min, x_max) or None if y is outside the room.
+    """
+    intersections = []
+    n = len(vertices)
+    for i in range(n):
+        x1, y1 = vertices[i]
+        x2, y2 = vertices[(i + 1) % n]
+        if abs(y2 - y1) < 1e-10:
+            continue
+        t = (y - y1) / (y2 - y1)
+        if 0 <= t <= 1:
+            intersections.append(x1 + t * (x2 - x1))
+    if len(intersections) < 2:
+        return None
+    return min(intersections), max(intersections)
+
+
 def bisector_filter(coords: np.ndarray, spk_l, spk_r, tolerance: float) -> np.ndarray:
     """Boolean mask for points within tolerance of the perpendicular bisector."""
     dl = np.sqrt((coords[:, 0] - spk_l[0]) ** 2 + (coords[:, 1] - spk_l[1]) ** 2)
@@ -110,15 +130,35 @@ def equilateral_penalty(coords: np.ndarray, spk_l, spk_r) -> np.ndarray:
     return np.abs(avg_d / ss - 1.0) * 0.5
 
 
-def describe_position(xy, vertices: list) -> dict[str, float]:
-    """Distances from a point to walls in each cardinal direction via ray casting."""
+def describe_position(xy, vertices: list, orientation: dict | None = None) -> dict[str, float]:
+    """Distances from a point to walls in named directions via ray casting.
+
+    If orientation is provided, uses the detected speaker/listener axes:
+    - "front wall" = direction behind speakers (front_wall_dir)
+    - "rear wall" = opposite of front wall
+    - "side wall L" / "side wall R" = along and against spread axis
+
+    Falls back to cardinal directions if no orientation given.
+    """
     x, y = float(xy[0]), float(xy[1])
-    dirs = {
-        "front wall (right)": (1, 0),
-        "rear wall (left)": (-1, 0),
-        "side wall (bottom)": (0, -1),
-        "side wall (top)": (0, 1),
-    }
+
+    if orientation:
+        fw = orientation["front_wall_dir"]
+        da = orientation["depth_axis"]
+        sa = orientation["spread_axis"]
+        dirs = {
+            "front wall": fw,
+            "rear wall": (da[0], da[1]),       # toward listener
+            "side wall L": (-sa[0], -sa[1]),    # toward left speaker side
+            "side wall R": (sa[0], sa[1]),      # toward right speaker side
+        }
+    else:
+        dirs = {
+            "front wall": (1, 0),
+            "rear wall": (-1, 0),
+            "side wall L": (0, -1),
+            "side wall R": (0, 1),
+        }
     distances = {}
     n = len(vertices)
     for name, (dx, dy) in dirs.items():

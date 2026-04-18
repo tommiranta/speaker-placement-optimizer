@@ -4,7 +4,7 @@ import numpy as np
 from .config import RoomConfig
 from .geometry import (
     bisector_filter, dist2d, equilateral_penalty, min_wall_distances,
-    polygon_area_perimeter, room_y_range_at_x,
+    polygon_area_perimeter, room_x_range_at_y, room_y_range_at_x,
 )
 from .solver import (
     SPEED_OF_SOUND, build_domain, compute_all_responses, compute_eigenmodes,
@@ -41,14 +41,24 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
         for dmy in np.arange(-max_move_y, max_move_y + step / 2, step):
             mx, my = mid[0] + dmx, mid[1] + dmy
 
-            # Room centering check
-            y_range = room_y_range_at_x(mx, vertices)
-            if y_range is None:
-                continue
-            room_center_y = (y_range[0] + y_range[1]) / 2
-            mid_along = mx * direction[0] + my * direction[1]
-            center_along = mx * direction[0] + room_center_y * direction[1]
-            if abs(mid_along - center_along) > SPEAKER_CENTER_TOL:
+            # Room centering check: speaker pair midpoint should be at
+            # the room's center along the spread axis.
+            # Use the appropriate range function based on spread direction.
+            if abs(direction[0]) > abs(direction[1]):
+                # Spread is mostly along x → check x-range at this y
+                rng = room_x_range_at_y(my, vertices)
+                if rng is None:
+                    continue
+                room_center_spread = (rng[0] + rng[1]) / 2
+                mid_spread = mx
+            else:
+                # Spread is mostly along y → check y-range at this x
+                rng = room_y_range_at_x(mx, vertices)
+                if rng is None:
+                    continue
+                room_center_spread = (rng[0] + rng[1]) / 2
+                mid_spread = my
+            if abs(mid_spread - room_center_spread) > SPEAKER_CENTER_TOL:
                 continue
 
             distance_range = max_move_y
@@ -78,19 +88,25 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                 if wall_dist[idx1] < min_wall or wall_dist[idx2] < min_wall:
                     continue
 
-                # Enforce exact symmetry after grid snap
+                # Enforce symmetry after grid snap
                 p1, p2 = coords[idx1], coords[idx2]
 
-                # Speakers must be at same depth (same x-coordinate)
-                if abs(p1[0] - p2[0]) > 1e-6:
+                # Speakers must be at same depth along the depth axis
+                depth1 = p1[0] * direction[1] - p1[1] * direction[0]
+                depth2 = p2[0] * direction[1] - p2[1] * direction[0]
+                if abs(depth1 - depth2) > 0.01:
                     continue
 
-                # Speaker pair must be centered between side walls
-                actual_mid_y = (p1[1] + p2[1]) / 2
-                yr = room_y_range_at_x(p1[0], vertices)
-                if yr is not None:
-                    room_cy = (yr[0] + yr[1]) / 2
-                    if abs(actual_mid_y - room_cy) > SPEAKER_CENTER_TOL:
+                # Post-snap centering check along spread axis
+                if abs(direction[0]) > abs(direction[1]):
+                    actual_mid_spread = (p1[0] + p2[0]) / 2
+                    rng = room_x_range_at_y((p1[1] + p2[1]) / 2, vertices)
+                else:
+                    actual_mid_spread = (p1[1] + p2[1]) / 2
+                    rng = room_y_range_at_x((p1[0] + p2[0]) / 2, vertices)
+                if rng is not None:
+                    room_c = (rng[0] + rng[1]) / 2
+                    if abs(actual_mid_spread - room_c) > SPEAKER_CENTER_TOL:
                         continue
 
                 key = (idx1, idx2)
@@ -193,7 +209,11 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
         compute_speaker_contribution(sp_r_idx, li_idx, evecs, inv_denom, z_w))
     score_orig = score_responses(resp_orig)[0]
 
-    # Compute move ranges
+    # Compute move ranges along depth and spread axes
+    orient = cfg.detect_orientation()
+    da = orient["depth_axis"]
+    sa = orient["spread_axis"]
+
     xs = [v[0] for v in cfg.vertices]
     ys = [v[1] for v in cfg.vertices]
     room_depth = max(xs) - min(xs)
@@ -204,18 +224,18 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
     max_move_y = room_width * cfg.move_fraction
 
     # Limit speaker depth from front wall if configured
-    front_wall_x = max(xs)
     if cfg.max_speaker_depth is not None:
-        min_speaker_x = front_wall_x - cfg.max_speaker_depth
-        current_spk_x = coords[sp_l_idx][0]
-        # Clamp max_move_x so speakers don't go deeper than the limit
-        max_move_into_room = current_spk_x - min_speaker_x
-        max_move_x = min(max_move_x, max(max_move_into_room, 0))
-        print(f"\n  Max speaker depth: {cfg.max_speaker_depth * 100:.0f} cm from front wall "
-              f"(min x = {min_speaker_x:.2f})")
+        # Find the front wall distance for current speaker position
+        from .geometry import describe_position
+        spk_wall = describe_position(coords[sp_l_idx], cfg.vertices, orient)
+        current_depth = spk_wall.get("front wall", 0)
+        # Clamp move range so speakers can't exceed max depth
+        max_move_into_room = max(cfg.max_speaker_depth - current_depth, 0)
+        max_move_x = min(max_move_x, current_depth + max_move_into_room)
+        print(f"\n  Max speaker depth: {cfg.max_speaker_depth * 100:.0f} cm from front wall")
 
-    print(f"  Move range: x ±{max_move_x:.2f} m ({cfg.move_fraction:.0%} of "
-          f"{room_depth:.2f} m), y ±{max_move_y:.2f} m ({cfg.move_fraction:.0%} of "
+    print(f"  Move range: depth ±{max_move_x:.2f} m ({cfg.move_fraction:.0%} of "
+          f"{room_depth:.2f} m), spread ±{max_move_y:.2f} m ({cfg.move_fraction:.0%} of "
           f"{room_width:.2f} m)")
 
     listener_wall_ok = wall_dist >= cfg.listener_min_wall

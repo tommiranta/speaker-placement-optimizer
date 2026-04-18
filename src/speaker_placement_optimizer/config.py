@@ -1,7 +1,7 @@
 """Room and optimization configuration."""
+import math
 from dataclasses import dataclass, field
 from urllib.parse import urlparse, unquote
-import re
 
 
 @dataclass
@@ -35,6 +35,46 @@ class RoomConfig:
 
     # Frequency range
     freq_max: float = 200.0
+
+    def detect_orientation(self) -> dict:
+        """Detect the speaker/listener orientation from positions.
+
+        Returns dict with:
+        - spread_axis: unit vector along speaker spread (L→R)
+        - depth_axis: unit vector from speakers toward listener
+        - front_wall_dir: direction toward the front wall (behind speakers)
+        """
+        sl, sr = self.speaker_left, self.speaker_right
+        li = self.listener
+
+        # Spread axis: L → R
+        sx, sy = sr[0] - sl[0], sr[1] - sl[1]
+        spread_len = math.sqrt(sx * sx + sy * sy)
+        if spread_len < 0.01:
+            return {"spread_axis": (0, 1), "depth_axis": (-1, 0),
+                    "front_wall_dir": (1, 0)}
+        spread_axis = (sx / spread_len, sy / spread_len)
+
+        # Depth axis: perpendicular to spread, toward listener
+        # Two candidates: rotate spread ±90°
+        perp1 = (-spread_axis[1], spread_axis[0])
+        perp2 = (spread_axis[1], -spread_axis[0])
+
+        mid = ((sl[0] + sr[0]) / 2, (sl[1] + sr[1]) / 2)
+        to_li = (li[0] - mid[0], li[1] - mid[1])
+
+        # Pick the perpendicular that points toward the listener
+        dot1 = perp1[0] * to_li[0] + perp1[1] * to_li[1]
+        depth_axis = perp1 if dot1 > 0 else perp2
+
+        # Front wall is behind the speakers (opposite of depth)
+        front_wall_dir = (-depth_axis[0], -depth_axis[1])
+
+        return {
+            "spread_axis": spread_axis,
+            "depth_axis": depth_axis,
+            "front_wall_dir": front_wall_dir,
+        }
 
     @classmethod
     def from_url(cls, url: str, reorigin: bool = True) -> "RoomConfig":
@@ -101,63 +141,91 @@ class RoomConfig:
     def symmetrize(self) -> list[str]:
         """Correct speaker and listener positions for stereo symmetry.
 
-        Ensures:
-        - Both speakers at the same depth (averaged x).
-        - Speaker pair centered between side walls at their depth.
-        - Listener y centered between speakers (on perpendicular bisector).
-        - If listener position looks unset, compute a default (equilateral).
+        Works in any orientation by projecting onto the detected depth
+        and spread axes. Ensures:
+        - Both speakers at the same depth (along depth axis).
+        - Speaker pair centered between side walls.
+        - Listener on the perpendicular bisector of the speaker pair.
 
         Returns list of correction messages (empty if no changes needed).
         """
-        import math
         corrections = []
+        orient = self.detect_orientation()
+        da = orient["depth_axis"]
+        sa = orient["spread_axis"]
+
         sl = self.speaker_left
         sr = self.speaker_right
 
-        # 1. Speakers at same depth (same x)
-        if abs(sl[0] - sr[0]) > 0.01:
-            avg_x = (sl[0] + sr[0]) / 2
-            corrections.append(
-                f"Aligned speaker depth: both moved to x={avg_x:.2f} "
-                f"(was L={sl[0]:.2f}, R={sr[0]:.2f})")
-            sl = (avg_x, sl[1])
-            sr = (avg_x, sr[1])
+        # 1. Speakers at same depth (project onto depth axis, average)
+        depth_l = sl[0] * da[0] + sl[1] * da[1]
+        depth_r = sr[0] * da[0] + sr[1] * da[1]
+        if abs(depth_l - depth_r) > 0.01:
+            avg_depth = (depth_l + depth_r) / 2
+            shift_l = avg_depth - depth_l
+            shift_r = avg_depth - depth_r
+            sl = (sl[0] + shift_l * da[0], sl[1] + shift_l * da[1])
+            sr = (sr[0] + shift_r * da[0], sr[1] + shift_r * da[1])
+            corrections.append(f"Aligned speaker depth along listening axis")
 
         # 2. Center speaker pair between side walls
         if self.vertices:
-            from .geometry import room_y_range_at_x
-            yr = room_y_range_at_x(sl[0], self.vertices)
-            if yr is not None:
-                room_center_y = (yr[0] + yr[1]) / 2
-                pair_mid_y = (sl[1] + sr[1]) / 2
-                offset = pair_mid_y - room_center_y
-                if abs(offset) > 0.01:
-                    sl = (sl[0], sl[1] - offset)
-                    sr = (sr[0], sr[1] - offset)
-                    corrections.append(
-                        f"Centered speakers between side walls: "
-                        f"shifted {-offset:+.2f} m to room center y={room_center_y:.2f}")
+            from .geometry import room_y_range_at_x, room_x_range_at_y
+            mid = ((sl[0] + sr[0]) / 2, (sl[1] + sr[1]) / 2)
+            # Project midpoint onto spread axis to check centering
+            # Find room extent along spread axis at speaker position
+            # For near-axis-aligned setups, use the appropriate range function
+            spread_pos = mid[0] * sa[0] + mid[1] * sa[1]
+
+            # Determine room center along spread axis
+            if abs(sa[0]) > abs(sa[1]):
+                # Spread is mostly along x → check x-range at this y
+                xr = room_x_range_at_y(mid[1], self.vertices)
+                if xr:
+                    room_center_spread = ((xr[0] + xr[1]) / 2) * sa[0]
+                else:
+                    room_center_spread = spread_pos
+            else:
+                # Spread is mostly along y → check y-range at this x
+                yr = room_y_range_at_x(mid[0], self.vertices)
+                if yr:
+                    room_center_spread = ((yr[0] + yr[1]) / 2) * sa[1]
+                else:
+                    room_center_spread = spread_pos
+
+            offset = spread_pos - room_center_spread
+            if abs(offset) > 0.01:
+                sl = (sl[0] - offset * sa[0], sl[1] - offset * sa[1])
+                sr = (sr[0] - offset * sa[0], sr[1] - offset * sa[1])
+                corrections.append(
+                    f"Centered speakers between side walls "
+                    f"(shifted {-offset * 100:+.0f} cm)")
 
         self.speaker_left = sl
         self.speaker_right = sr
 
-        # 3. Center listener y between speakers
-        spk_mid_y = (sl[1] + sr[1]) / 2
-        if abs(self.listener[1] - spk_mid_y) > 0.01:
-            corrections.append(
-                f"Centered listener: y {self.listener[1]:.2f} → {spk_mid_y:.2f} "
-                f"(midpoint of speakers)")
-            self.listener = (self.listener[0], spk_mid_y)
+        # 3. Center listener on perpendicular bisector
+        spk_mid = ((sl[0] + sr[0]) / 2, (sl[1] + sr[1]) / 2)
+        # Listener's spread-axis component should match speaker midpoint
+        li_spread = self.listener[0] * sa[0] + self.listener[1] * sa[1]
+        mid_spread = spk_mid[0] * sa[0] + spk_mid[1] * sa[1]
+        spread_offset = li_spread - mid_spread
+        if abs(spread_offset) > 0.01:
+            new_li = (self.listener[0] - spread_offset * sa[0],
+                      self.listener[1] - spread_offset * sa[1])
+            corrections.append(f"Centered listener between speakers")
+            self.listener = new_li
 
-        # 4. If listener x is unset (0,0), compute equilateral default
-        if self.listener == (0.0, spk_mid_y) or self.listener[0] == 0.0:
-            spread = abs(sr[1] - sl[1])
+        # 4. If listener is at origin, compute equilateral default
+        if abs(self.listener[0]) < 0.01 and abs(self.listener[1]) < 0.01:
+            spread = math.sqrt((sr[0] - sl[0]) ** 2 + (sr[1] - sl[1]) ** 2)
             eq_depth = spread * math.sqrt(3) / 2
-            default_x = sl[0] - eq_depth
+            default = (spk_mid[0] + eq_depth * da[0],
+                       spk_mid[1] + eq_depth * da[1])
             corrections.append(
-                f"Computed listener depth: x={default_x:.2f} "
-                f"(equilateral triangle, {eq_depth:.2f} m from speakers)")
-            self.listener = (default_x, spk_mid_y)
+                f"Computed listener position (equilateral, "
+                f"{eq_depth:.2f} m from speakers)")
+            self.listener = default
 
         return corrections
 

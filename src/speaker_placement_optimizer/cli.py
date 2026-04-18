@@ -85,6 +85,7 @@ def main(url, fix_listener, absorption, move_fraction, max_speaker_depth,
     cur_sl = coords[result["sp_l_idx"]]
     cur_sr = coords[result["sp_r_idx"]]
     cur_li = coords[result["li_idx"]]
+    orient = cfg.detect_orientation()
 
     click.echo(f"\n{'=' * 60}")
     click.echo("RESULTS")
@@ -92,7 +93,7 @@ def main(url, fix_listener, absorption, move_fraction, max_speaker_depth,
 
     std_o, peak_o, null_o = response_stats(result["resp_orig"])
     click.echo(f"\nOriginal:")
-    _print_placement(cur_sl, cur_sr, cur_li, cfg.vertices)
+    _print_placement(cur_sl, cur_sr, cur_li, cfg.vertices, orient)
     click.echo(f"  Spread: {dist2d(cur_sl, cur_sr):.2f} m  |  "
                f"std={std_o:.1f} dB, peak=+{peak_o:.1f} dB, null={null_o:.1f} dB  |  "
                f"score: {result['score_orig']:.2f}")
@@ -131,7 +132,7 @@ def main(url, fix_listener, absorption, move_fraction, max_speaker_depth,
 
         click.echo(f"\n{'─' * 60}")
         click.echo(f"#{rank}  score: {score:.2f}")
-        _print_placement(sl_p, sr_p, lpos, cfg.vertices)
+        _print_placement(sl_p, sr_p, lpos, cfg.vertices, orient)
         click.echo(f"  Spread: {spread:.2f} m  |  "
                    f"std={std_v:.1f} dB, peak=+{peak_v:.1f} dB, null={null_v:.1f} dB")
         _print_link(f"#{rank}", url_out)
@@ -153,21 +154,22 @@ def main(url, fix_listener, absorption, move_fraction, max_speaker_depth,
         _open_url(best_url)
 
 
-def _print_placement(sl_p, sr_p, lpos, vertices):
+def _print_placement(sl_p, sr_p, lpos, vertices, orient):
     """Print wall distances for speakers and listener."""
-    sl_d = describe_position(sl_p, vertices)
-    sr_d = describe_position(sr_p, vertices)
-    li_d = describe_position(lpos, vertices)
+    sl_d = describe_position(sl_p, vertices, orient)
+    sr_d = describe_position(sr_p, vertices, orient)
+    li_d = describe_position(lpos, vertices, orient)
+
     def cm(d, key):
         return d.get(key, 0) * 100
 
-    click.echo(f"  Speaker L:  {cm(sl_d, 'front wall (right)'):.0f} cm from front wall, "
-               f"{cm(sl_d, 'side wall (bottom)'):.0f} cm from side wall")
-    click.echo(f"  Speaker R:  {cm(sr_d, 'front wall (right)'):.0f} cm from front wall, "
-               f"{cm(sr_d, 'side wall (top)'):.0f} cm from side wall")
-    click.echo(f"  Listener:   {cm(li_d, 'front wall (right)'):.0f} cm from front wall, "
-               f"{cm(li_d, 'side wall (bottom)'):.0f} / "
-               f"{cm(li_d, 'side wall (top)'):.0f} cm from side walls")
+    click.echo(f"  Speaker L:  {cm(sl_d, 'front wall'):.0f} cm from front wall, "
+               f"{cm(sl_d, 'side wall L'):.0f} cm from side wall")
+    click.echo(f"  Speaker R:  {cm(sr_d, 'front wall'):.0f} cm from front wall, "
+               f"{cm(sr_d, 'side wall R'):.0f} cm from side wall")
+    click.echo(f"  Listener:   {cm(li_d, 'front wall'):.0f} cm from front wall, "
+               f"{cm(li_d, 'side wall L'):.0f} / "
+               f"{cm(li_d, 'side wall R'):.0f} cm from side walls")
 
 
 def _make_redirect_file(url: str) -> str:
