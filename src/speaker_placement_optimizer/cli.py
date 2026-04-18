@@ -170,20 +170,35 @@ def _print_placement(sl_p, sr_p, lpos, vertices):
                f"{cm(li_d, 'side wall (top)'):.0f} cm from side walls")
 
 
-def _print_link(label: str, url: str):
-    """Print a clickable terminal hyperlink using OSC 8 escape sequences."""
-    click.echo(f"  \033]8;;{url}\033\\Open {label} in calculator\033]8;;\033\\")
+def _make_redirect_file(url: str) -> str:
+    """Write a temp HTML file that redirects to the given URL.
 
-
-def _open_url(url: str):
-    """Open a URL in the default browser via temp HTML redirect."""
+    Needed because terminals and OS 'open' commands percent-encode |
+    characters in URLs, breaking the vesalaasanen.com hash fragment.
+    """
     import html
     import tempfile
     escaped = html.escape(url, quote=True)
     with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False) as f:
         f.write(f'<html><head><meta http-equiv="refresh" content="0;url={escaped}">'
                 f'</head><body><a href="{escaped}">Open</a></body></html>')
-        tmp_path = f.name
+        return f.name
+
+
+def _print_link(label: str, url: str):
+    """Print a clickable terminal hyperlink using OSC 8 escape sequences.
+
+    Points to a local HTML redirect file to avoid terminal URL encoding
+    of | and other special characters.
+    """
+    redirect = _make_redirect_file(url)
+    file_url = f"file://{redirect}"
+    click.echo(f"  \033]8;;{file_url}\033\\Open {label} in calculator\033]8;;\033\\")
+
+
+def _open_url(url: str):
+    """Open a URL in the default browser via temp HTML redirect."""
+    tmp_path = _make_redirect_file(url)
     if sys.platform == "darwin":
         subprocess.Popen(["open", tmp_path])
     elif sys.platform == "win32":

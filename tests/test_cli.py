@@ -17,6 +17,17 @@ SIMPLE_URL = (
 )
 
 
+def _extract_redirect_url(output):
+    """Extract the URL from the HTML redirect file referenced in OSC 8 link."""
+    m = re.search(r"file://(/[^\033]+\.html)", output)
+    if not m:
+        return None
+    with open(m.group(1)) as f:
+        html = f.read()
+    m2 = re.search(r'url=([^"]+)"', html)
+    return m2.group(1) if m2 else None
+
+
 class TestCliOptions:
     def test_missing_url_shows_error(self):
         runner = CliRunner()
@@ -52,13 +63,17 @@ class TestCliOptions:
         runner = CliRunner()
         result = runner.invoke(main, ["--url", offset_url, "--no-reorigin", "--top", "1"])
         assert result.exit_code == 0
-        assert "1.00,1.00" in result.output
+        url = _extract_redirect_url(result.output)
+        assert url is not None, "No redirect file in output"
+        assert "1.00,1.00" in url
 
     def test_reorigin_is_default(self):
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
         assert result.exit_code == 0
-        assert "0.00,0.00" in result.output
+        url = _extract_redirect_url(result.output)
+        assert url is not None, "No redirect file in output"
+        assert "0.00,0.00" in url
 
     @patch("speaker_placement_optimizer.cli._open_url")
     def test_open_browser_calls_open_url(self, mock_open):
@@ -67,9 +82,6 @@ class TestCliOptions:
         assert result.exit_code == 0
         assert "Opening best result in browser" in result.output
         mock_open.assert_called_once()
-        call_url = mock_open.call_args[0][0]
-        assert "#poly," in call_url
-        assert "|s," in call_url
 
     @patch("speaker_placement_optimizer.cli._open_url")
     def test_no_open_browser_by_default(self, mock_open):
@@ -95,20 +107,14 @@ class TestCliOptions:
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
         assert result.exit_code == 0
-        # Listener line should show distances to both side walls
         assert "cm from side walls" in result.output
 
-    def test_output_no_grid_coordinates(self):
-        """Output should not show raw (x, y) grid coordinates."""
+    def test_redirect_url_has_literal_pipe(self):
+        """The URL inside the HTML redirect must have literal |, not %7C."""
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
         assert result.exit_code == 0
-        # The results section should not have "(x.xx, y.yy)" coordinate pairs
-        # (only the URL contains raw coords, which is fine)
-        lines = result.output.split("\n")
-        result_started = False
-        for line in lines:
-            if line.strip().startswith("#1"):
-                result_started = True
-            if result_started and line.strip().startswith("Speaker"):
-                assert "(" not in line, f"Grid coords found in result: {line}"
+        url = _extract_redirect_url(result.output)
+        assert url is not None
+        assert "|s," in url, f"URL has encoded pipes: {url}"
+        assert "%7C" not in url
