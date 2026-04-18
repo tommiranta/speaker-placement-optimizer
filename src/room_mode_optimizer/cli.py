@@ -13,7 +13,7 @@ from .solver import (
 
 
 @click.command()
-@click.option("--url", type=str, default=None,
+@click.option("--url", type=str, required=True,
               help="vesalaasanen.com room mode calculator URL to use as starting point.")
 @click.option("--fix-listener", is_flag=True, default=False,
               help="Lock listener at starting position, only optimize speakers.")
@@ -37,11 +37,8 @@ def main(url, fix_listener, absorption, move_fraction, top):
     click.echo("=" * 60)
 
     # Load config
-    if url:
-        click.echo(f"Parsing URL...")
-        cfg = RoomConfig.from_url(url)
-    else:
-        cfg = DEFAULT_CONFIG
+    click.echo(f"Parsing URL...")
+    cfg = RoomConfig.from_url(url)
 
     # Apply CLI overrides
     if absorption is not None:
