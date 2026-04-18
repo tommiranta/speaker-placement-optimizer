@@ -1,0 +1,9 @@
+[project]
+name = "room-mode-optimizer"
+version = "0.1.0"
+description = "Optimize speaker and listener placement to minimize room mode effects"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.4.4",
+    "scipy>=1.17.1",
+]
