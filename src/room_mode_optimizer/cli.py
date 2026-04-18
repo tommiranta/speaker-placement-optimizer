@@ -1,6 +1,5 @@
 """Command-line interface for room mode optimizer."""
 import time
-import webbrowser
 
 import click
 import numpy as np
@@ -24,11 +23,14 @@ from .solver import (
               help="Speaker move range as fraction of room dimensions (default: 0.30).")
 @click.option("--top", type=int, default=5,
               help="Number of top results to show (default: 5).")
+@click.option("--freq-max", type=float, default=None,
+              help="Upper frequency limit in Hz (default: 200).")
 @click.option("--reorigin/--no-reorigin", default=True, show_default=True,
               help="Shift coordinates so the bottom-left corner is at (0,0).")
 @click.option("--open-browser", is_flag=True, default=False,
               help="Open the best result URL in the default web browser.")
-def main(url, fix_listener, absorption, move_fraction, top, reorigin, open_browser):
+def main(url, fix_listener, absorption, move_fraction, top, freq_max,
+         reorigin, open_browser):
     """Optimize speaker and listener placement to minimize room mode effects.
 
     Reads room configuration from a vesalaasanen.com URL (--url) or uses the
@@ -50,6 +52,8 @@ def main(url, fix_listener, absorption, move_fraction, top, reorigin, open_brows
         cfg.absorption = absorption
     if move_fraction is not None:
         cfg.move_fraction = move_fraction
+    if freq_max is not None:
+        cfg.freq_max = freq_max
 
     # Run optimization
     result = run_optimization(cfg, fix_listener=fix_listener)
@@ -142,7 +146,7 @@ def main(url, fix_listener, absorption, move_fraction, top, reorigin, open_brows
 
     if open_browser and best_url:
         click.echo(f"\nOpening best result in browser...")
-        webbrowser.open(best_url)
+        click.launch(best_url)
 
 
 def _print_placement(sl_p, sr_p, lpos, vertices):

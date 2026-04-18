@@ -8,7 +8,7 @@ from .geometry import (
 )
 from .solver import (
     SPEED_OF_SOUND, build_domain, compute_all_responses, compute_eigenmodes,
-    compute_decay_rate, compute_speaker_contribution, nearest_idx,
+    compute_decay_rate, compute_speaker_contribution, make_freqs, nearest_idx,
     precompute_modal_kernel, score_responses,
 )
 
@@ -90,7 +90,7 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
     return pairs
 
 
-def evaluate_speaker_pairs(pairs, coords, evecs, inv_denom, z_w,
+def evaluate_speaker_pairs(pairs, coords, evecs, inv_denom, z_w, n_freqs,
                            listener_wall_ok, fixed_li=None):
     """Evaluate all speaker pairs with optional fixed listener.
 
@@ -126,7 +126,7 @@ def evaluate_speaker_pairs(pairs, coords, evecs, inv_denom, z_w,
             valid = on_bis & listener_wall_ok & r_ok
             if not valid.any():
                 continue
-            resp = compute_all_responses([s1, s2], evecs, inv_denom, z_w)
+            resp = compute_all_responses([s1, s2], evecs, inv_denom, z_w, n_freqs)
             scores = score_responses(resp)
             ep = equilateral_penalty(coords, sl_p, sr_p)
             total = scores + ep
@@ -150,7 +150,9 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
 
     print(f"Room: {area:.1f} m² floor, {area * cfg.height:.1f} m³, "
           f"height {cfg.height} m")
+    freqs = make_freqs(cfg.freq_max)
     print(f"Perimeter: {perimeter:.1f} m, T60: {T60:.2f} s")
+    print(f"Frequency range: 20–{cfg.freq_max:.0f} Hz ({len(freqs)} points)")
     print(f"Coordinates: origin at bottom-left corner (0,0)")
 
     # Build grid
@@ -170,8 +172,9 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
             f = SPEED_OF_SOUND * np.sqrt(evals[i]) / (2 * np.pi)
             print(f"  Mode {i}: {f:.1f} Hz")
 
-    inv_denom, z_w = precompute_modal_kernel(
-        evals, decay_rate, cfg.height, cfg.speaker_z, cfg.listener_z)
+    inv_denom, z_w, freqs = precompute_modal_kernel(
+        evals, decay_rate, cfg.height, cfg.speaker_z, cfg.listener_z, freqs)
+    n_freqs = len(freqs)
 
     # Current positions
     sp_l_idx = nearest_idx(*cfg.speaker_left, coords)
@@ -211,7 +214,7 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
     print(f"  {len(coarse_pairs)} speaker pairs")
 
     coarse_configs = evaluate_speaker_pairs(
-        coarse_pairs, coords, evecs, inv_denom, z_w,
+        coarse_pairs, coords, evecs, inv_denom, z_w, n_freqs,
         listener_wall_ok, fixed_li)
 
     if not coarse_configs:
@@ -247,7 +250,7 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
             refine_radius, refine_radius)
         if fine_pairs:
             fine_configs = evaluate_speaker_pairs(
-                fine_pairs, coords, evecs, inv_denom, z_w,
+                fine_pairs, coords, evecs, inv_denom, z_w, n_freqs,
                 listener_wall_ok, fixed_li)
             best_configs.extend(fine_configs)
 

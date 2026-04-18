@@ -30,6 +30,9 @@ class RoomConfig:
     # Search parameters
     search_step: float = 0.05
 
+    # Frequency range
+    freq_max: float = 200.0
+
     @classmethod
     def from_url(cls, url: str, reorigin: bool = True) -> "RoomConfig":
         """Parse a vesalaasanen.com room mode calculator URL.

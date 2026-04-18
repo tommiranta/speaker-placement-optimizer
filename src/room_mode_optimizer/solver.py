@@ -15,7 +15,11 @@ N_Z_MODES = 5
 FREQ_MIN = 20
 FREQ_MAX = 200
 FREQ_STEP = 2
-FREQS = np.arange(FREQ_MIN, FREQ_MAX + 0.1, FREQ_STEP)
+
+
+def make_freqs(freq_max=FREQ_MAX):
+    """Generate frequency array from FREQ_MIN to freq_max in FREQ_STEP increments."""
+    return np.arange(FREQ_MIN, freq_max + 0.1, FREQ_STEP)
 
 
 def build_domain(vertices, dx=GRID_DX):
@@ -95,15 +99,19 @@ def compute_decay_rate(area, perimeter, height, absorption):
     return 6.91 / T60, T60
 
 
-def precompute_modal_kernel(evals, decay_rate, height, speaker_z, listener_z):
+def precompute_modal_kernel(evals, decay_rate, height, speaker_z, listener_z,
+                            freqs=None):
     """Precompute frequency-dependent modal denominator.
 
     Returns:
         inv_denom: [n_freq, n_z, n_modes] complex array.
         z_weights: [n_z] array.
+        freqs: the frequency array used.
     """
+    if freqs is None:
+        freqs = make_freqs()
     c = SPEED_OF_SOUND
-    omega = 2 * np.pi * FREQS
+    omega = 2 * np.pi * freqs
     k2 = (omega / c) ** 2
     nz = np.arange(N_Z_MODES)
     kz2 = (nz * np.pi / height) ** 2
@@ -113,15 +121,15 @@ def precompute_modal_kernel(evals, decay_rate, height, speaker_z, listener_z):
     k_eff2 = k2[:, None] - kz2[None, :]
     eta = 2 * decay_rate * omega / c ** 2
     denom = evals[None, None, :] - k_eff2[:, :, None] + 1j * eta[:, None, None]
-    return 1.0 / denom, z_w
+    return 1.0 / denom, z_w, freqs
 
 
-def compute_all_responses(speaker_idxs, evecs, inv_denom, z_w):
+def compute_all_responses(speaker_idxs, evecs, inv_denom, z_w, n_freqs):
     """Frequency response from speakers to ALL listener positions.
 
     Returns: [n_points, n_freq] complex array.
     """
-    response = np.zeros((evecs.shape[0], len(FREQS)), dtype=complex)
+    response = np.zeros((evecs.shape[0], n_freqs), dtype=complex)
     for si in speaker_idxs:
         s_vec = evecs[si, :]
         G_modal = s_vec[None, None, :] * inv_denom

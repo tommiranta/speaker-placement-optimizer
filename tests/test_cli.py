@@ -54,19 +54,28 @@ class TestCliOptions:
         # With default reorigin, polygon starts at (0,0)
         assert "0.00,0.00" in result.output
 
-    @patch("room_mode_optimizer.cli.webbrowser.open")
-    def test_open_browser_calls_webbrowser(self, mock_open):
+    @patch("room_mode_optimizer.cli.click.launch")
+    def test_open_browser_calls_launch(self, mock_launch):
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1", "--open-browser"])
         assert result.exit_code == 0
         assert "Opening best result in browser" in result.output
-        mock_open.assert_called_once()
-        call_url = mock_open.call_args[0][0]
+        mock_launch.assert_called_once()
+        call_url = mock_launch.call_args[0][0]
         assert call_url.startswith("https://www.vesalaasanen.com/")
+        # URL should not be percent-encoded (#, | should be literal)
+        assert "#poly," in call_url
+        assert "|s," in call_url
 
-    @patch("room_mode_optimizer.cli.webbrowser.open")
-    def test_no_open_browser_by_default(self, mock_open):
+    @patch("room_mode_optimizer.cli.click.launch")
+    def test_no_open_browser_by_default(self, mock_launch):
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
         assert result.exit_code == 0
-        mock_open.assert_not_called()
+        mock_launch.assert_not_called()
+
+    def test_freq_max_option(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1", "--freq-max", "150"])
+        assert result.exit_code == 0
+        assert "20–150 Hz" in result.output
