@@ -31,8 +31,13 @@ class RoomConfig:
     search_step: float = 0.05
 
     @classmethod
-    def from_url(cls, url: str) -> "RoomConfig":
+    def from_url(cls, url: str, reorigin: bool = True) -> "RoomConfig":
         """Parse a vesalaasanen.com room mode calculator URL.
+
+        Args:
+            url: Full URL with hash fragment.
+            reorigin: If True, shift all coordinates so bottom-left corner
+                      is at (0, 0). Set to False to keep original coordinates.
 
         Expected hash format:
         #poly,HEIGHT,x1,y1,x2,y2,...|s,x,y,z,...|s,x,y,z,...|l,x,y,z|t..|a0.30
@@ -66,8 +71,8 @@ class RoomConfig:
             elif kind.startswith("a"):
                 cfg.absorption = float(kind[1:])
 
-        # Normalize so origin is at bottom-left corner
-        cfg._normalize_origin()
+        if reorigin:
+            cfg._normalize_origin()
         return cfg
 
     def _normalize_origin(self):

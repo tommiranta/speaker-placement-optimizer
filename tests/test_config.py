@@ -44,6 +44,19 @@ class TestFromUrl:
             RoomConfig.from_url("https://example.com/page")
 
 
+    def test_no_reorigin_keeps_original_coords(self):
+        cfg = RoomConfig.from_url(SAMPLE_URL, reorigin=False)
+        # Vertices should still start at (1,1), not shifted to (0,0)
+        assert cfg.vertices[0] == pytest.approx((1.0, 1.0), abs=1e-6)
+        assert cfg.speaker_left == pytest.approx((5.5, 1.5), abs=1e-6)
+        assert cfg.listener == pytest.approx((3.0, 2.5), abs=1e-6)
+
+    def test_reorigin_true_shifts_to_zero(self):
+        cfg = RoomConfig.from_url(SAMPLE_URL, reorigin=True)
+        assert cfg.vertices[0] == pytest.approx((0.0, 0.0), abs=1e-6)
+        assert cfg.speaker_left == pytest.approx((4.5, 0.5), abs=1e-6)
+
+
 class TestNormalizeOrigin:
     def test_shifts_to_zero(self):
         cfg = RoomConfig()

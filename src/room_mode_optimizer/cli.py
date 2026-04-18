@@ -1,5 +1,6 @@
 """Command-line interface for room mode optimizer."""
 import time
+import webbrowser
 
 import click
 import numpy as np
@@ -23,7 +24,11 @@ from .solver import (
               help="Speaker move range as fraction of room dimensions (default: 0.30).")
 @click.option("--top", type=int, default=5,
               help="Number of top results to show (default: 5).")
-def main(url, fix_listener, absorption, move_fraction, top):
+@click.option("--reorigin/--no-reorigin", default=True, show_default=True,
+              help="Shift coordinates so the bottom-left corner is at (0,0).")
+@click.option("--open-browser", is_flag=True, default=False,
+              help="Open the best result URL in the default web browser.")
+def main(url, fix_listener, absorption, move_fraction, top, reorigin, open_browser):
     """Optimize speaker and listener placement to minimize room mode effects.
 
     Reads room configuration from a vesalaasanen.com URL (--url) or uses the
@@ -37,8 +42,8 @@ def main(url, fix_listener, absorption, move_fraction, top):
     click.echo("=" * 60)
 
     # Load config
-    click.echo(f"Parsing URL...")
-    cfg = RoomConfig.from_url(url)
+    click.echo("Parsing URL...")
+    cfg = RoomConfig.from_url(url, reorigin=reorigin)
 
     # Apply CLI overrides
     if absorption is not None:
@@ -83,6 +88,7 @@ def main(url, fix_listener, absorption, move_fraction, top):
     # Print top results
     shown = set()
     rank = 0
+    best_url = None
     for score, s1, s2, li in result["configs"]:
         key = (s1, s2, li)
         if key in shown:
@@ -121,6 +127,8 @@ def main(url, fix_listener, absorption, move_fraction, top):
         click.echo(f"    Response:   std={std_v:.1f} dB, peak=+{peak_v:.1f} dB, "
                    f"null={null_v:.1f} dB")
         click.echo(f"    URL: {url_out}")
+        if best_url is None:
+            best_url = url_out
 
     best_score = result["configs"][0][0]
     score_orig = result["score_orig"]
@@ -131,6 +139,10 @@ def main(url, fix_listener, absorption, move_fraction, top):
                    f"improvement {improvement:.1f}%)")
 
     click.echo(f"Completed in {time.time() - t0:.1f} s")
+
+    if open_browser and best_url:
+        click.echo(f"\nOpening best result in browser...")
+        webbrowser.open(best_url)
 
 
 def _print_placement(sl_p, sr_p, lpos, vertices):
