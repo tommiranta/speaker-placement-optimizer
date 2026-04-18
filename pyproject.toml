@@ -1,5 +1,5 @@
 [project]
-name = "room-mode-optimizer"
+name = "speaker-placement-optimizer"
 version = "0.1.0"
 description = "Optimize speaker and listener placement to minimize room mode effects"
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-room-optimize = "room_mode_optimizer.cli:main"
+spo = "speaker_placement_optimizer.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -23,4 +23,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/room_mode_optimizer"]
+packages = ["src/speaker_placement_optimizer"]

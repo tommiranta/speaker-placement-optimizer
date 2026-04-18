@@ -1,6 +1,6 @@
-"""Tests for room_mode_optimizer.config."""
+"""Tests for speaker_placement_optimizer.config."""
 import pytest
-from room_mode_optimizer.config import RoomConfig
+from speaker_placement_optimizer.config import RoomConfig
 
 
 # A minimal vesalaasanen-style URL for testing

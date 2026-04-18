@@ -1,7 +1,7 @@
-"""Tests for room_mode_optimizer.solver."""
+"""Tests for speaker_placement_optimizer.solver."""
 import numpy as np
 import pytest
-from room_mode_optimizer.solver import (
+from speaker_placement_optimizer.solver import (
     build_domain,
     compute_eigenmodes,
     score_responses,

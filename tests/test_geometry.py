@@ -1,7 +1,7 @@
-"""Tests for room_mode_optimizer.geometry."""
+"""Tests for speaker_placement_optimizer.geometry."""
 import numpy as np
 import pytest
-from room_mode_optimizer.geometry import (
+from speaker_placement_optimizer.geometry import (
     bisector_filter,
     min_wall_distances,
     points_in_polygon,

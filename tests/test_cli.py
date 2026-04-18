@@ -1,9 +1,9 @@
-"""Tests for room_mode_optimizer.cli."""
+"""Tests for speaker_placement_optimizer.cli."""
 from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from room_mode_optimizer.cli import main
+from speaker_placement_optimizer.cli import main
 
 # A simple rectangular room URL for fast tests
 SIMPLE_URL = (
@@ -54,7 +54,7 @@ class TestCliOptions:
         # With default reorigin, polygon starts at (0,0)
         assert "0.00,0.00" in result.output
 
-    @patch("room_mode_optimizer.cli._open_url")
+    @patch("speaker_placement_optimizer.cli._open_url")
     def test_open_browser_calls_open_url(self, mock_open):
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1", "--open-browser"])
@@ -67,7 +67,7 @@ class TestCliOptions:
         assert "#poly," in call_url
         assert "|s," in call_url
 
-    @patch("room_mode_optimizer.cli._open_url")
+    @patch("speaker_placement_optimizer.cli._open_url")
     def test_no_open_browser_by_default(self, mock_open):
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
