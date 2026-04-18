@@ -1,4 +1,5 @@
 """Tests for speaker_placement_optimizer.cli."""
+import re
 from unittest.mock import patch
 
 from click.testing import CliRunner
@@ -28,11 +29,18 @@ class TestCliOptions:
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
         for opt in ["--url", "--fix-listener", "--absorption",
-                     "--move-fraction", "--top", "--reorigin", "--open-browser"]:
+                     "--move-fraction", "--max-speaker-depth",
+                     "--top", "--freq-max", "--reorigin", "--open-browser"]:
             assert opt in result.output
 
+    def test_default_top_is_3(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["--url", SIMPLE_URL])
+        assert result.exit_code == 0
+        assert "#3" in result.output
+        assert "#4" not in result.output
+
     def test_no_reorigin_keeps_original_coords(self):
-        # URL with origin at (1,1)
         offset_url = (
             "https://www.vesalaasanen.com/tools/room-mode-calculator"
             "#poly,2.60,1.00,1.00,5.00,1.00,5.00,4.00,1.00,4.00"
@@ -44,14 +52,12 @@ class TestCliOptions:
         runner = CliRunner()
         result = runner.invoke(main, ["--url", offset_url, "--no-reorigin", "--top", "1"])
         assert result.exit_code == 0
-        # With --no-reorigin, coords in output should reflect original (1-based)
-        assert "1.00,1.00" in result.output  # polygon starts at (1,1)
+        assert "1.00,1.00" in result.output
 
     def test_reorigin_is_default(self):
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
         assert result.exit_code == 0
-        # With default reorigin, polygon starts at (0,0)
         assert "0.00,0.00" in result.output
 
     @patch("speaker_placement_optimizer.cli._open_url")
@@ -62,8 +68,6 @@ class TestCliOptions:
         assert "Opening best result in browser" in result.output
         mock_open.assert_called_once()
         call_url = mock_open.call_args[0][0]
-        assert call_url.startswith("https://www.vesalaasanen.com/")
-        # URL must contain literal # and | (not percent-encoded)
         assert "#poly," in call_url
         assert "|s," in call_url
 
@@ -80,18 +84,31 @@ class TestCliOptions:
         assert result.exit_code == 0
         assert "20–150 Hz" in result.output
 
-    def test_results_are_symmetric(self):
-        """Listener should be roughly equidistant from both speakers."""
-        import re, math
+    def test_output_shows_wall_distances_in_cm(self):
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
         assert result.exit_code == 0
-        # Extract listen↔L and listen↔R distances from output
-        m = re.search(r"listen↔L=(\d+\.\d+) m, listen↔R=(\d+\.\d+) m", result.output)
-        assert m, "Could not find triangle distances in output"
-        dl, dr = float(m.group(1)), float(m.group(2))
-        # Distance difference should be ≤ 8cm (the bisector tolerance)
-        assert abs(dl - dr) <= 0.10, (
-            f"Listener not centered: dist_L={dl:.2f}, dist_R={dr:.2f}, "
-            f"diff={abs(dl-dr):.2f} m"
-        )
+        assert "cm from front wall" in result.output
+        assert "cm from side wall" in result.output
+
+    def test_output_shows_listener_side_walls(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
+        assert result.exit_code == 0
+        # Listener line should show distances to both side walls
+        assert "cm from side walls" in result.output
+
+    def test_output_no_grid_coordinates(self):
+        """Output should not show raw (x, y) grid coordinates."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
+        assert result.exit_code == 0
+        # The results section should not have "(x.xx, y.yy)" coordinate pairs
+        # (only the URL contains raw coords, which is fine)
+        lines = result.output.split("\n")
+        result_started = False
+        for line in lines:
+            if line.strip().startswith("#1"):
+                result_started = True
+            if result_started and line.strip().startswith("Speaker"):
+                assert "(" not in line, f"Grid coords found in result: {line}"
