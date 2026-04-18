@@ -12,6 +12,7 @@ Geometry constraint: speakers and listener must form an approximately
 equilateral triangle. Speakers are searched as symmetric pairs about a
 midpoint, and the listener is constrained to the perpendicular bisector.
 """
+import argparse
 import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import eigsh
@@ -427,10 +428,21 @@ def describe_position(xy, vertices, label="point"):
 # Main optimizer
 # ---------------------------------------------------------------------------
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Optimize speaker/listener placement to minimize room mode effects.")
+    parser.add_argument("--fix-listener", action="store_true",
+                        help="Lock listener at starting position, only optimize speakers")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     t0 = time.time()
 
     print("Room Mode Optimizer")
+    if args.fix_listener:
+        print("Mode: fixed listener — optimizing speakers only")
     print("=" * 60)
 
     # --- Room properties ---
@@ -521,8 +533,13 @@ def main():
           f"{room_depth:.2f} m), y ±{max_move_y:.2f} m ({SPEAKER_MOVE_FRACTION:.0%} of "
           f"{room_width_at_spk:.2f} m)")
 
-    def evaluate_speaker_pairs(pairs, label=""):
-        """Evaluate all speaker pairs, return sorted (score, s1, s2, li) list."""
+    def evaluate_speaker_pairs(pairs, fixed_li=None):
+        """Evaluate all speaker pairs, return sorted (score, s1, s2, li) list.
+
+        If fixed_li is set, the listener is locked at that grid index and
+        only speaker pairs where the listener is on the bisector are kept.
+        Otherwise, the best listener on the bisector is found for each pair.
+        """
         configs = []
         for pi, (s1, s2, mid, d) in enumerate(pairs):
             if (pi + 1) % 500 == 0:
@@ -531,32 +548,64 @@ def main():
             sl_p = coords[s1]
             sr_p = coords[s2]
 
-            on_bis = bisector_filter(coords, sl_p, sr_p, BISECTOR_TOLERANCE)
-            d_l = np.sqrt((coords[:, 0] - sl_p[0]) ** 2 +
-                          (coords[:, 1] - sl_p[1]) ** 2)
-            d_r = np.sqrt((coords[:, 0] - sr_p[0]) ** 2 +
-                          (coords[:, 1] - sr_p[1]) ** 2)
-            avg_dist = (d_l + d_r) / 2
-            ratio = avg_dist / max(d, 0.01)
-            r_ok = ((ratio >= DISTANCE_RATIO_MIN) &
-                    (ratio <= DISTANCE_RATIO_MAX))
-            valid = on_bis & listener_wall_ok & r_ok
+            if fixed_li is not None:
+                # Check if the fixed listener is on this pair's bisector
+                li_coord = coords[fixed_li:fixed_li + 1]
+                on_bis = bisector_filter(li_coord, sl_p, sr_p,
+                                         BISECTOR_TOLERANCE)
+                if not on_bis[0]:
+                    continue
+                # Check distance ratio
+                d_l = np.sqrt((li_coord[0, 0] - sl_p[0]) ** 2 +
+                              (li_coord[0, 1] - sl_p[1]) ** 2)
+                d_r = np.sqrt((li_coord[0, 0] - sr_p[0]) ** 2 +
+                              (li_coord[0, 1] - sr_p[1]) ** 2)
+                avg_dist = (d_l + d_r) / 2
+                ratio = avg_dist / max(d, 0.01)
+                if not (DISTANCE_RATIO_MIN <= ratio <= DISTANCE_RATIO_MAX):
+                    continue
 
-            if not valid.any():
-                continue
+                # Fast: compute response at single listener only
+                resp = (compute_speaker_contribution(
+                            s1, fixed_li, evecs, inv_denom, z_w) +
+                        compute_speaker_contribution(
+                            s2, fixed_li, evecs, inv_denom, z_w))
+                sc = score_responses(resp)[0]
+                ep = equilateral_penalty(li_coord, sl_p, sr_p)[0]
+                configs.append((sc + ep, s1, s2, fixed_li))
+            else:
+                # Search for best listener on the bisector
+                on_bis = bisector_filter(coords, sl_p, sr_p,
+                                         BISECTOR_TOLERANCE)
+                d_l = np.sqrt((coords[:, 0] - sl_p[0]) ** 2 +
+                              (coords[:, 1] - sl_p[1]) ** 2)
+                d_r = np.sqrt((coords[:, 0] - sr_p[0]) ** 2 +
+                              (coords[:, 1] - sr_p[1]) ** 2)
+                avg_dist = (d_l + d_r) / 2
+                ratio = avg_dist / max(d, 0.01)
+                r_ok = ((ratio >= DISTANCE_RATIO_MIN) &
+                        (ratio <= DISTANCE_RATIO_MAX))
+                valid = on_bis & listener_wall_ok & r_ok
 
-            resp = compute_all_responses([s1, s2], evecs, inv_denom, z_w)
-            scores = score_responses(resp)
-            ep = equilateral_penalty(coords, sl_p, sr_p)
-            total = scores + ep
-            total[~valid] = np.inf
+                if not valid.any():
+                    continue
 
-            best_li_local = int(np.argmin(total))
-            if total[best_li_local] < np.inf:
-                configs.append((total[best_li_local], s1, s2, best_li_local))
+                resp = compute_all_responses([s1, s2], evecs, inv_denom, z_w)
+                scores = score_responses(resp)
+                ep = equilateral_penalty(coords, sl_p, sr_p)
+                total = scores + ep
+                total[~valid] = np.inf
+
+                best_li_local = int(np.argmin(total))
+                if total[best_li_local] < np.inf:
+                    configs.append((total[best_li_local], s1, s2,
+                                    best_li_local))
 
         configs.sort(key=lambda x: x[0])
         return configs
+
+    # Determine listener mode
+    fixed_li = li_idx if args.fix_listener else None
 
     # =======================================================================
     # Coarse pass: 10cm speaker step over full range
@@ -570,7 +619,7 @@ def main():
         max_move_x, max_move_y)
     print(f"  {len(coarse_pairs)} speaker pairs")
 
-    coarse_configs = evaluate_speaker_pairs(coarse_pairs)
+    coarse_configs = evaluate_speaker_pairs(coarse_pairs, fixed_li=fixed_li)
 
     if not coarse_configs:
         print("\nNo valid configurations found! Try relaxing constraints.")
@@ -619,7 +668,8 @@ def main():
             refine_radius, refine_radius)
 
         if fine_pairs:
-            fine_configs = evaluate_speaker_pairs(fine_pairs)
+            fine_configs = evaluate_speaker_pairs(fine_pairs,
+                                                  fixed_li=fixed_li)
             best_configs.extend(fine_configs)
 
     # Also include the coarse configs in case fine search didn't improve
