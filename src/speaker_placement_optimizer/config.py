@@ -33,6 +33,11 @@ class RoomConfig:
     # Speaker depth constraint
     max_speaker_depth: float | None = None  # max distance from front wall (m), None=no limit
 
+    # Asymmetric placement constraints (disable centering when set)
+    lock_speaker_l: float | None = None  # lock L speaker distance from its side wall (m)
+    lock_speaker_r: float | None = None  # lock R speaker distance from its side wall (m)
+    max_spread: float | None = None      # max speaker-to-speaker distance (m)
+
     # Frequency range
     freq_max: float = 200.0
 
@@ -168,25 +173,22 @@ class RoomConfig:
             sr = (sr[0] + shift_r * da[0], sr[1] + shift_r * da[1])
             corrections.append(f"Aligned speaker depth along listening axis")
 
-        # 2. Center speaker pair between side walls
-        if self.vertices:
+        # 2. Center speaker pair between side walls (skip if asymmetric mode)
+        asymmetric = (self.lock_speaker_l is not None or
+                      self.lock_speaker_r is not None or
+                      self.max_spread is not None)
+        if self.vertices and not asymmetric:
             from .geometry import room_y_range_at_x, room_x_range_at_y
             mid = ((sl[0] + sr[0]) / 2, (sl[1] + sr[1]) / 2)
-            # Project midpoint onto spread axis to check centering
-            # Find room extent along spread axis at speaker position
-            # For near-axis-aligned setups, use the appropriate range function
             spread_pos = mid[0] * sa[0] + mid[1] * sa[1]
 
-            # Determine room center along spread axis
             if abs(sa[0]) > abs(sa[1]):
-                # Spread is mostly along x → check x-range at this y
                 xr = room_x_range_at_y(mid[1], self.vertices)
                 if xr:
                     room_center_spread = ((xr[0] + xr[1]) / 2) * sa[0]
                 else:
                     room_center_spread = spread_pos
             else:
-                # Spread is mostly along y → check y-range at this x
                 yr = room_y_range_at_x(mid[0], self.vertices)
                 if yr:
                     room_center_spread = ((yr[0] + yr[1]) / 2) * sa[1]
@@ -200,6 +202,8 @@ class RoomConfig:
                 corrections.append(
                     f"Centered speakers between side walls "
                     f"(shifted {-offset * 100:+.0f} cm)")
+        elif asymmetric:
+            corrections.append("Asymmetric mode: skipping room centering")
 
         self.speaker_left = sl
         self.speaker_right = sr

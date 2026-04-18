@@ -26,6 +26,13 @@ MIN_RESULT_DISTANCE = 0.15  # meters (in speaker spread or depth)
               help="Speaker move range as fraction of room dimensions (default: 0.30).")
 @click.option("--max-speaker-depth", type=int, default=None,
               help="Max speaker distance from front wall in cm (default: no limit).")
+@click.option("--lock-speaker-L", "lock_speaker_l", type=int, default=None,
+              help="Lock left speaker distance from its side wall in cm.")
+@click.option("--lock-speaker-R", "lock_speaker_r", type=int, default=None,
+              help="Lock right speaker distance from its side wall in cm.")
+@click.option("--max-spread", type=int, default=None,
+              help="Max speaker-to-speaker distance in cm. "
+                   "Cannot be used when both speakers are locked.")
 @click.option("--top", type=int, default=3,
               help="Number of top results to show (default: 3).")
 @click.option("--freq-max", type=float, default=None,
@@ -35,6 +42,7 @@ MIN_RESULT_DISTANCE = 0.15  # meters (in speaker spread or depth)
 @click.option("--open-browser", is_flag=True, default=False,
               help="Open the best result URL in the default web browser.")
 def main(url, fix_listener, absorption, move_fraction, max_speaker_depth,
+         lock_speaker_l, lock_speaker_r, max_spread,
          top, freq_max, reorigin, open_browser):
     """Optimize speaker and listener placement to minimize room mode effects.
 
@@ -61,6 +69,16 @@ def main(url, fix_listener, absorption, move_fraction, max_speaker_depth,
         cfg.freq_max = freq_max
     if max_speaker_depth is not None:
         cfg.max_speaker_depth = max_speaker_depth / 100.0  # cm → m
+    if lock_speaker_l is not None:
+        cfg.lock_speaker_l = lock_speaker_l / 100.0
+    if lock_speaker_r is not None:
+        cfg.lock_speaker_r = lock_speaker_r / 100.0
+    if max_spread is not None:
+        if lock_speaker_l is not None and lock_speaker_r is not None:
+            raise click.UsageError(
+                "--max-spread cannot be used when both speakers are locked "
+                "(--lock-speaker-L + --lock-speaker-R)")
+        cfg.max_spread = max_spread / 100.0
 
     # Auto-correct asymmetric input
     corrections = cfg.symmetrize()

@@ -19,20 +19,31 @@ SPEAKER_CENTER_TOL = 0.06  # max speaker midpoint offset from room centerline (m
 
 def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                                      min_wall, vertices,
-                                     max_move_x, max_move_y):
+                                     max_move_x, max_move_y,
+                                     lock_speaker_l=None, lock_speaker_r=None,
+                                     max_spread=None):
     """Generate candidate speaker pairs symmetric about a midpoint.
 
     Constraints:
     - Symmetric about midpoint (same orientation as current pair)
     - Each speaker within max_move per axis of original
     - Each speaker at least min_wall from walls
-    - Pair midpoint centered between room side walls
+    - Pair midpoint centered between room side walls (unless asymmetric)
+    - lock_side_wall: if set, each speaker must be within this distance
+      of its nearest side wall (meters). Disables centering constraint.
+    - max_spread: if set, max speaker-to-speaker distance (meters).
 
     Returns list of (s1_idx, s2_idx, midpoint, distance) tuples.
     """
     mid = np.array([(spk_l[0] + spk_r[0]) / 2, (spk_l[1] + spk_r[1]) / 2])
     d_current = dist2d(spk_l, spk_r)
     direction = np.array([spk_r[0] - spk_l[0], spk_r[1] - spk_l[1]]) / d_current
+
+    # Build orientation dict for side wall distance checks
+    perp = (-direction[1], direction[0])
+    _orient = {"spread_axis": tuple(direction),
+               "depth_axis": tuple(perp),
+               "front_wall_dir": (-perp[0], -perp[1])}
 
     pairs = []
     seen = set()
@@ -41,30 +52,32 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
         for dmy in np.arange(-max_move_y, max_move_y + step / 2, step):
             mx, my = mid[0] + dmx, mid[1] + dmy
 
-            # Room centering check: speaker pair midpoint should be at
-            # the room's center along the spread axis.
-            # Use the appropriate range function based on spread direction.
-            if abs(direction[0]) > abs(direction[1]):
-                # Spread is mostly along x → check x-range at this y
-                rng = room_x_range_at_y(my, vertices)
-                if rng is None:
+            # Room centering check (skip in asymmetric mode)
+            asymmetric = (lock_speaker_l is not None or
+                          lock_speaker_r is not None or
+                          max_spread is not None)
+            if not asymmetric:
+                if abs(direction[0]) > abs(direction[1]):
+                    rng = room_x_range_at_y(my, vertices)
+                    if rng is None:
+                        continue
+                    room_center_spread = (rng[0] + rng[1]) / 2
+                    mid_spread = mx
+                else:
+                    rng = room_y_range_at_x(mx, vertices)
+                    if rng is None:
+                        continue
+                    room_center_spread = (rng[0] + rng[1]) / 2
+                    mid_spread = my
+                if abs(mid_spread - room_center_spread) > SPEAKER_CENTER_TOL:
                     continue
-                room_center_spread = (rng[0] + rng[1]) / 2
-                mid_spread = mx
-            else:
-                # Spread is mostly along y → check y-range at this x
-                rng = room_y_range_at_x(mx, vertices)
-                if rng is None:
-                    continue
-                room_center_spread = (rng[0] + rng[1]) / 2
-                mid_spread = my
-            if abs(mid_spread - room_center_spread) > SPEAKER_CENTER_TOL:
-                continue
 
             distance_range = max_move_y
             for dd in np.arange(-distance_range, distance_range + step / 2, step):
                 d = d_current + dd
                 if d < 0.5:
+                    continue
+                if max_spread is not None and d > max_spread:
                     continue
                 half = d / 2
                 s1x = mx - half * direction[0]
@@ -88,8 +101,19 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                 if wall_dist[idx1] < min_wall or wall_dist[idx2] < min_wall:
                     continue
 
-                # Enforce symmetry after grid snap
                 p1, p2 = coords[idx1], coords[idx2]
+
+                # Per-speaker side wall lock
+                if lock_speaker_l is not None or lock_speaker_r is not None:
+                    from .geometry import describe_position
+                    if lock_speaker_l is not None:
+                        d1 = describe_position(p1, vertices, _orient)
+                        if d1.get("side wall L", 0) > lock_speaker_l:
+                            continue
+                    if lock_speaker_r is not None:
+                        d2 = describe_position(p2, vertices, _orient)
+                        if d2.get("side wall R", 0) > lock_speaker_r:
+                            continue
 
                 # Speakers must be at same depth along the depth axis
                 depth1 = p1[0] * direction[1] - p1[1] * direction[0]
@@ -97,17 +121,18 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                 if abs(depth1 - depth2) > 0.01:
                     continue
 
-                # Post-snap centering check along spread axis
-                if abs(direction[0]) > abs(direction[1]):
-                    actual_mid_spread = (p1[0] + p2[0]) / 2
-                    rng = room_x_range_at_y((p1[1] + p2[1]) / 2, vertices)
-                else:
-                    actual_mid_spread = (p1[1] + p2[1]) / 2
-                    rng = room_y_range_at_x((p1[0] + p2[0]) / 2, vertices)
-                if rng is not None:
-                    room_c = (rng[0] + rng[1]) / 2
-                    if abs(actual_mid_spread - room_c) > SPEAKER_CENTER_TOL:
-                        continue
+                # Post-snap centering check (skip in asymmetric mode)
+                if not asymmetric:
+                    if abs(direction[0]) > abs(direction[1]):
+                        actual_mid_spread = (p1[0] + p2[0]) / 2
+                        rng = room_x_range_at_y((p1[1] + p2[1]) / 2, vertices)
+                    else:
+                        actual_mid_spread = (p1[1] + p2[1]) / 2
+                        rng = room_y_range_at_x((p1[0] + p2[0]) / 2, vertices)
+                    if rng is not None:
+                        room_c = (rng[0] + rng[1]) / 2
+                        if abs(actual_mid_spread - room_c) > SPEAKER_CENTER_TOL:
+                            continue
 
                 key = (idx1, idx2)
                 if key not in seen:
@@ -247,7 +272,9 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
     coarse_pairs = generate_symmetric_speaker_pairs(
         cfg.speaker_left, cfg.speaker_right, coarse_step,
         coords, wall_dist, cfg.speaker_min_wall, cfg.vertices,
-        max_move_x, max_move_y)
+        max_move_x, max_move_y,
+        lock_speaker_l=cfg.lock_speaker_l, lock_speaker_r=cfg.lock_speaker_r,
+        max_spread=cfg.max_spread)
     print(f"  {len(coarse_pairs)} speaker pairs")
 
     coarse_configs = evaluate_speaker_pairs(
@@ -284,7 +311,9 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
         fine_pairs = generate_symmetric_speaker_pairs(
             (sl_c[0], sl_c[1]), (sr_c[0], sr_c[1]), fine_step,
             coords, wall_dist, cfg.speaker_min_wall, cfg.vertices,
-            refine_radius, refine_radius)
+            refine_radius, refine_radius,
+            lock_speaker_l=cfg.lock_speaker_l, lock_speaker_r=cfg.lock_speaker_r,
+        max_spread=cfg.max_spread)
         if fine_pairs:
             fine_configs = evaluate_speaker_pairs(
                 fine_pairs, coords, evecs, inv_denom, z_w, n_freqs,
