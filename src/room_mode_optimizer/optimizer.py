@@ -14,8 +14,6 @@ from .solver import (
 
 # Stereo triangle constraints
 BISECTOR_TOLERANCE = 0.06   # max |dist_L - dist_R| for listener (m) — ~1 grid cell
-DISTANCE_RATIO_MIN = 0.7
-DISTANCE_RATIO_MAX = 1.5
 SPEAKER_CENTER_TOL = 0.06  # max speaker midpoint offset from room centerline (m)
 
 
@@ -122,23 +120,16 @@ def evaluate_speaker_pairs(pairs, coords, evecs, inv_denom, z_w, n_freqs,
             li_coord = coords[fixed_li:fixed_li + 1]
             if not bisector_filter(li_coord, sl_p, sr_p, BISECTOR_TOLERANCE)[0]:
                 continue
-            d_l = dist2d(li_coord[0], sl_p)
-            d_r = dist2d(li_coord[0], sr_p)
-            ratio = (d_l + d_r) / 2 / max(d, 0.01)
-            if not (DISTANCE_RATIO_MIN <= ratio <= DISTANCE_RATIO_MAX):
-                continue
             resp = (compute_speaker_contribution(s1, fixed_li, evecs, inv_denom, z_w) +
                     compute_speaker_contribution(s2, fixed_li, evecs, inv_denom, z_w))
             sc = score_responses(resp)[0]
             ep = equilateral_penalty(li_coord, sl_p, sr_p)[0]
             configs.append((sc + ep, s1, s2, fixed_li))
         else:
+            # Listener must be on bisector and away from walls.
+            # Depth (x-position) is freely optimized — no distance ratio limit.
             on_bis = bisector_filter(coords, sl_p, sr_p, BISECTOR_TOLERANCE)
-            d_l = np.sqrt((coords[:, 0] - sl_p[0]) ** 2 + (coords[:, 1] - sl_p[1]) ** 2)
-            d_r = np.sqrt((coords[:, 0] - sr_p[0]) ** 2 + (coords[:, 1] - sr_p[1]) ** 2)
-            ratio = (d_l + d_r) / 2 / max(d, 0.01)
-            r_ok = (ratio >= DISTANCE_RATIO_MIN) & (ratio <= DISTANCE_RATIO_MAX)
-            valid = on_bis & listener_wall_ok & r_ok
+            valid = on_bis & listener_wall_ok
             if not valid.any():
                 continue
             resp = compute_all_responses([s1, s2], evecs, inv_denom, z_w, n_freqs)

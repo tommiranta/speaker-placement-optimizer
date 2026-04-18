@@ -101,10 +101,12 @@ class RoomConfig:
         Ensures:
         - Both speakers at the same depth (averaged x).
         - Speaker pair centered between side walls at their depth.
-        - Listener on the perpendicular bisector (centered y between speakers).
+        - Listener y centered between speakers (on perpendicular bisector).
+        - If listener position looks unset, compute a default (equilateral).
 
         Returns list of correction messages (empty if no changes needed).
         """
+        import math
         corrections = []
         sl = self.speaker_left
         sr = self.speaker_right
@@ -136,13 +138,23 @@ class RoomConfig:
         self.speaker_left = sl
         self.speaker_right = sr
 
-        # 3. Center listener between speakers (on perpendicular bisector)
+        # 3. Center listener y between speakers
         spk_mid_y = (sl[1] + sr[1]) / 2
         if abs(self.listener[1] - spk_mid_y) > 0.01:
             corrections.append(
                 f"Centered listener: y {self.listener[1]:.2f} → {spk_mid_y:.2f} "
                 f"(midpoint of speakers)")
             self.listener = (self.listener[0], spk_mid_y)
+
+        # 4. If listener x is unset (0,0), compute equilateral default
+        if self.listener == (0.0, spk_mid_y) or self.listener[0] == 0.0:
+            spread = abs(sr[1] - sl[1])
+            eq_depth = spread * math.sqrt(3) / 2
+            default_x = sl[0] - eq_depth
+            corrections.append(
+                f"Computed listener depth: x={default_x:.2f} "
+                f"(equilateral triangle, {eq_depth:.2f} m from speakers)")
+            self.listener = (default_x, spk_mid_y)
 
         return corrections
 
