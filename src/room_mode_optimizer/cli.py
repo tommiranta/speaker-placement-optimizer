@@ -1,4 +1,6 @@
 """Command-line interface for room mode optimizer."""
+import subprocess
+import sys
 import time
 
 import click
@@ -146,7 +148,20 @@ def main(url, fix_listener, absorption, move_fraction, top, freq_max,
 
     if open_browser and best_url:
         click.echo(f"\nOpening best result in browser...")
-        click.launch(best_url)
+        _open_url(best_url)
+
+
+def _open_url(url: str):
+    """Open a URL in the default browser without shell interpretation.
+
+    Uses subprocess directly to avoid shell mangling of # and | characters.
+    """
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", url])
+    elif sys.platform == "win32":
+        subprocess.Popen(["start", "", url], shell=True)
+    else:
+        subprocess.Popen(["xdg-open", url])
 
 
 def _print_placement(sl_p, sr_p, lpos, vertices):

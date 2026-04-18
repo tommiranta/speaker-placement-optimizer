@@ -54,28 +54,44 @@ class TestCliOptions:
         # With default reorigin, polygon starts at (0,0)
         assert "0.00,0.00" in result.output
 
-    @patch("room_mode_optimizer.cli.click.launch")
-    def test_open_browser_calls_launch(self, mock_launch):
+    @patch("room_mode_optimizer.cli._open_url")
+    def test_open_browser_calls_open_url(self, mock_open):
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1", "--open-browser"])
         assert result.exit_code == 0
         assert "Opening best result in browser" in result.output
-        mock_launch.assert_called_once()
-        call_url = mock_launch.call_args[0][0]
+        mock_open.assert_called_once()
+        call_url = mock_open.call_args[0][0]
         assert call_url.startswith("https://www.vesalaasanen.com/")
-        # URL should not be percent-encoded (#, | should be literal)
+        # URL must contain literal # and | (not percent-encoded)
         assert "#poly," in call_url
         assert "|s," in call_url
 
-    @patch("room_mode_optimizer.cli.click.launch")
-    def test_no_open_browser_by_default(self, mock_launch):
+    @patch("room_mode_optimizer.cli._open_url")
+    def test_no_open_browser_by_default(self, mock_open):
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
         assert result.exit_code == 0
-        mock_launch.assert_not_called()
+        mock_open.assert_not_called()
 
     def test_freq_max_option(self):
         runner = CliRunner()
         result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1", "--freq-max", "150"])
         assert result.exit_code == 0
         assert "20–150 Hz" in result.output
+
+    def test_results_are_symmetric(self):
+        """Listener should be roughly equidistant from both speakers."""
+        import re, math
+        runner = CliRunner()
+        result = runner.invoke(main, ["--url", SIMPLE_URL, "--top", "1"])
+        assert result.exit_code == 0
+        # Extract listen↔L and listen↔R distances from output
+        m = re.search(r"listen↔L=(\d+\.\d+) m, listen↔R=(\d+\.\d+) m", result.output)
+        assert m, "Could not find triangle distances in output"
+        dl, dr = float(m.group(1)), float(m.group(2))
+        # Distance difference should be ≤ 8cm (the bisector tolerance)
+        assert abs(dl - dr) <= 0.10, (
+            f"Listener not centered: dist_L={dl:.2f}, dist_R={dr:.2f}, "
+            f"diff={abs(dl-dr):.2f} m"
+        )

@@ -13,10 +13,10 @@ from .solver import (
 )
 
 # Stereo triangle constraints
-BISECTOR_TOLERANCE = 0.15
+BISECTOR_TOLERANCE = 0.06   # max |dist_L - dist_R| for listener (m) — ~1 grid cell
 DISTANCE_RATIO_MIN = 0.7
 DISTANCE_RATIO_MAX = 1.5
-SPEAKER_CENTER_TOL = 0.15
+SPEAKER_CENTER_TOL = 0.06  # max speaker midpoint offset from room centerline (m)
 
 
 def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
@@ -80,11 +80,17 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                 if wall_dist[idx1] < min_wall or wall_dist[idx2] < min_wall:
                     continue
 
+                # Enforce exact symmetry after grid snap:
+                # speakers must be at same depth (same x-coordinate)
+                p1, p2 = coords[idx1], coords[idx2]
+                if abs(p1[0] - p2[0]) > 1e-6:
+                    continue
+
                 key = (idx1, idx2)
                 if key not in seen:
                     seen.add(key)
-                    actual_mid = (coords[idx1] + coords[idx2]) / 2
-                    actual_d = dist2d(coords[idx1], coords[idx2])
+                    actual_mid = (p1 + p2) / 2
+                    actual_d = dist2d(p1, p2)
                     pairs.append((idx1, idx2, actual_mid, actual_d))
 
     return pairs
