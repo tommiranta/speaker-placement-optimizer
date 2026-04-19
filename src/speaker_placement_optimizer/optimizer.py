@@ -59,7 +59,8 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                                      min_wall, vertices,
                                      max_move_x, max_move_y,
                                      lock_speaker_l=None, lock_speaker_r=None,
-                                     max_spread=None):
+                                     max_spread=None,
+                                     max_speaker_depth=None, orient=None):
     """Generate candidate speaker pairs.
 
     When speakers are locked, their spread position is computed from the
@@ -174,6 +175,14 @@ def generate_symmetric_speaker_pairs(spk_l, spk_r, step, coords, wall_dist,
                     continue
 
                 p1, p2 = coords[idx1], coords[idx2]
+
+                # Absolute max depth from front wall
+                if max_speaker_depth is not None and orient is not None:
+                    from .geometry import describe_position as _desc
+                    fw1 = _desc(p1, vertices, orient).get("front wall", 0)
+                    fw2 = _desc(p2, vertices, orient).get("front wall", 0)
+                    if fw1 > max_speaker_depth or fw2 > max_speaker_depth:
+                        continue
 
                 # Speakers must be at same depth along the depth axis
                 depth1 = p1[0] * direction[1] - p1[1] * direction[0]
@@ -347,7 +356,8 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
         coords, wall_dist, cfg.speaker_min_wall, cfg.vertices,
         max_move_x, max_move_y,
         lock_speaker_l=cfg.lock_speaker_l, lock_speaker_r=cfg.lock_speaker_r,
-        max_spread=cfg.max_spread)
+        max_spread=cfg.max_spread,
+        max_speaker_depth=cfg.max_speaker_depth, orient=orient)
     print(f"  {len(coarse_pairs)} speaker pairs")
 
     coarse_configs = evaluate_speaker_pairs(
@@ -386,7 +396,8 @@ def run_optimization(cfg: RoomConfig, fix_listener: bool = False):
             coords, wall_dist, cfg.speaker_min_wall, cfg.vertices,
             refine_radius, refine_radius,
             lock_speaker_l=cfg.lock_speaker_l, lock_speaker_r=cfg.lock_speaker_r,
-        max_spread=cfg.max_spread)
+            max_spread=cfg.max_spread,
+            max_speaker_depth=cfg.max_speaker_depth, orient=orient)
         if fine_pairs:
             fine_configs = evaluate_speaker_pairs(
                 fine_pairs, coords, evecs, inv_denom, z_w, n_freqs,
