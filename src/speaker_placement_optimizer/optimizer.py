@@ -217,9 +217,20 @@ def evaluate_speaker_pairs(pairs, coords, evecs, inv_denom, z_w, n_freqs,
 
         sl_p, sr_p = coords[s1], coords[s2]
 
+        # Minimum listener depth: listener must be far enough from speakers
+        # that the angle at the listening position is <= 90°.
+        # This means: depth along listening axis >= spread / 2.
+        spread = d
+        min_depth = spread / 2
+        spk_mid = (sl_p + sr_p) / 2
+
         if fixed_li is not None:
             li_coord = coords[fixed_li:fixed_li + 1]
             if not bisector_filter(li_coord, sl_p, sr_p, BISECTOR_TOLERANCE)[0]:
+                continue
+            # Check minimum depth
+            li_depth = dist2d(li_coord[0], spk_mid)
+            if li_depth < min_depth:
                 continue
             resp = (compute_speaker_contribution(s1, fixed_li, evecs, inv_denom, z_w) +
                     compute_speaker_contribution(s2, fixed_li, evecs, inv_denom, z_w))
@@ -227,10 +238,12 @@ def evaluate_speaker_pairs(pairs, coords, evecs, inv_denom, z_w, n_freqs,
             ep = equilateral_penalty(li_coord, sl_p, sr_p)[0]
             configs.append((sc + ep, s1, s2, fixed_li))
         else:
-            # Listener must be on bisector and away from walls.
-            # Depth (x-position) is freely optimized — no distance ratio limit.
             on_bis = bisector_filter(coords, sl_p, sr_p, BISECTOR_TOLERANCE)
-            valid = on_bis & listener_wall_ok
+            # Filter by minimum depth from speakers
+            listener_depth = np.sqrt((coords[:, 0] - spk_mid[0]) ** 2 +
+                                     (coords[:, 1] - spk_mid[1]) ** 2)
+            depth_ok = listener_depth >= min_depth
+            valid = on_bis & listener_wall_ok & depth_ok
             if not valid.any():
                 continue
             resp = compute_all_responses([s1, s2], evecs, inv_denom, z_w, n_freqs)
